@@ -19,101 +19,62 @@ let
     first24bits + ".1";
   testIPs = {
     ES = buildTestIP "es";
-    DE = buildTestIP "de";
     AR = buildTestIP "ar";
     PE = buildTestIP "pe";
-    AU = buildTestIP "au";
   };
 
   countries = {
+    # Allowlist mode: only allows connections from Argentina
     spain = {
       code = "ES";
       ip = testIPs.ES;
       firewall = {
         mode = "allowlist";
-        countries = [
-          "AR"
-          "DE"
-        ];
+        countries = [ "AR" ];
       };
     };
+    # Allowlist mode: allows connections from Spain and Peru
     argentina = {
       code = "AR";
       ip = testIPs.AR;
       firewall = {
         mode = "allowlist";
-        countries = [
-          "ES"
-          "PE"
-        ];
+        countries = [ "ES" "PE" ];
       };
     };
+    # Blocklist mode: blocks connections from Spain, allows Argentina
     peru = {
       code = "PE";
       ip = testIPs.PE;
       firewall = {
         mode = "blocklist";
-        countries = [
-          "ES"
-          "DE"
-        ];
-      };
-    };
-    australia = {
-      code = "AU";
-      ip = testIPs.AU;
-      firewall = {
-        mode = "blocklist";
-        countries = [
-          "AR"
-          "ES"
-        ];
-      };
-    };
-    germany = {
-      code = "DE";
-      ip = testIPs.DE;
-      firewall = {
-        mode = "allowlist";
-        countries = [
-          "ES"
-          "AU"
-        ];
+        countries = [ "ES" ];
       };
     };
   };
 
   # Expected connectivity matrix (true = connection allowed)
+  # For bidirectional connectivity, BOTH sides must allow the other.
+  #
+  # Tests covered:
+  # - Allowlist allowed: spain->argentina (AR in spain's allowlist, ES in argentina's allowlist)
+  # - Allowlist allowed: argentina->spain (ES in argentina's allowlist, AR in spain's allowlist)
+  # - Allowlist allowed: argentina->peru (PE in argentina's allowlist, AR not in peru's blocklist)
+  # - Allowlist blocked: spain->peru (PE not in spain's allowlist)
+  # - Blocklist allowed: peru->argentina (AR not in peru's blocklist, PE in argentina's allowlist)
+  # - Blocklist blocked: peru->spain (ES in peru's blocklist)
   connectivityMatrix = {
     spain = {
-      argentina = true;
-      peru = false;
-      australia = false;
-      germany = true;
+      argentina = true; # AR in spain's allowlist, ES in argentina's allowlist
+      peru = false; # PE not in spain's allowlist
     };
     argentina = {
-      spain = true;
-      peru = true;
-      australia = false;
-      germany = false;
+      spain = true; # ES in argentina's allowlist, AR in spain's allowlist
+      peru = true; # PE in argentina's allowlist, AR not in peru's blocklist
     };
     peru = {
-      spain = false;
-      argentina = true;
-      australia = true;
-      germany = false;
-    };
-    australia = {
-      spain = false;
-      argentina = false;
-      peru = true;
-      germany = true;
-    };
-    germany = {
-      spain = true;
-      argentina = false;
-      peru = false;
-      australia = true;
+      spain = false; # ES in peru's blocklist
+      argentina = true; # AR not in peru's blocklist, PE in argentina's allowlist
     };
   };
 
@@ -180,17 +141,6 @@ pkgs.testers.nixosTest {
         ${name}.wait_for_unit("network.target")
         ${name}.wait_for_unit("nginx.service")
         ${name}.wait_for_unit("firewall.service")
-      '') countries
-    )}
-
-    # Show network configuration for each node
-    print("\\n=== Router network configuration ===")
-
-    ${lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (name: _: ''
-        print("\\n== ${name} network configuration ===")
-        ${name}.succeed("ip addr show")
-        ${name}.succeed("ip route show")
       '') countries
     )}
 

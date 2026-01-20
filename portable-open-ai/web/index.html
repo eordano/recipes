@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Inference Test</title>
+  <style>
+      :root {
+          --bg-color: #f0f0f0;
+          --text-color: #111827;
+          --header-bg: #ffffff;
+          --card-bg: #ffffff;
+          --border-color: #e5e7eb;
+          --input-bg: #f9fafb;
+          --input-border: #d1d5db;
+          --input-focus-border: #3b82f6;
+          --button-bg: #1c71d8;
+          --button-text: #ffffff;
+          --button-hover-bg: #1a63bA;
+          --button-disabled-bg: #9ca3af;
+          --pre-bg: #f3f4f6;
+          --link-color: #1c71d8;
+          --subtitle-color: #6b7280;
+
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+          color-scheme: light;
+      }
+
+      html[data-theme='dark'] {
+          --bg-color: #111827;
+          --text-color: #f9fafb;
+          --header-bg: #1f2937;
+          --card-bg: #1f2937;
+          --border-color: #374151;
+          --input-bg: #374151;
+          --input-border: #4b5563;
+          --input-focus-border: #60a5fa;
+          --button-bg: #3b82f6;
+          --button-hover-bg: #2563eb;
+          --button-disabled-bg: #4b5563;
+          --pre-bg: #1e2c40;
+          --link-color: #60a5fa;
+          --subtitle-color: #9ca3af;
+          color-scheme: dark;
+      }
+
+      * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+      }
+
+      body {
+          background-color: var(--bg-color);
+          color: var(--text-color);
+          font-size: 16px;
+          line-height: 1.6;
+          transition: background-color 0.2s, color 0.2s;
+      }
+
+      header {
+          background-color: var(--header-bg);
+          border-bottom: 1px solid var(--border-color);
+          padding: 0 2rem;
+          height: 60px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          position: sticky;
+          top: 0;
+          z-index: 10;
+      }
+
+      header h1 {
+          font-size: 1.25rem;
+          font-weight: 600;
+      }
+
+      header nav {
+          display: flex;
+          gap: 1rem;
+      }
+
+      header nav a {
+          color: var(--link-color);
+          text-decoration: none;
+          font-size: 0.875rem;
+          font-weight: 500;
+      }
+
+      header nav a:hover {
+          text-decoration: underline;
+      }
+
+      .api-key-container {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+      }
+      
+      .api-key-container label {
+          font-size: 0.875rem;
+          color: var(--subtitle-color);
+      }
+
+      main {
+          padding: 2rem;
+          max-width: 1400px;
+          margin: 0 auto;
+          display: flex;
+          flex-direction: column;
+          gap: 2rem;
+      }
+
+      .test-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 1.5rem;
+          padding: 1.5rem;
+          background-color: var(--card-bg);
+          border: 1px solid var(--border-color);
+          border-radius: 0.75rem;
+          box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+      }
+
+      @media (min-width: 1024px) {
+          .test-grid {
+              grid-template-columns: 0.8fr 1.2fr 1fr;
+          }
+      }
+
+      .explainer {
+          padding-right: 1.5rem;
+          border-right: 1px solid var(--border-color);
+          text-align: right;
+      }
+      
+      @media (max-width: 1023px) {
+          .explainer {
+              padding-right: 0;
+              padding-bottom: 1.5rem;
+              border-right: none;
+              border-bottom: 1px solid var(--border-color);
+              text-align: left;
+          }
+      }
+
+
+      .explainer h2 {
+          font-size: 1.125rem;
+          font-weight: 600;
+          margin-bottom: 0.25rem;
+      }
+
+      .explainer p {
+          font-size: 0.875rem;
+          color: var(--subtitle-color);
+      }
+
+      .input-area, .output-area {
+          display: flex;
+          flex-direction: column;
+          gap: 1rem;
+      }
+
+      label {
+          font-weight: 500;
+          font-size: 0.875rem;
+      }
+
+      textarea, input[type="text"], input[type="password"], select {
+          width: 100%;
+          padding: 0.5rem 0.75rem;
+          border-radius: 0.375rem;
+          border: 1px solid var(--input-border);
+          background-color: var(--input-bg);
+          color: var(--text-color);
+          font-family: inherit;
+          font-size: 1rem;
+      }
+
+      textarea:focus, input:focus, select:focus {
+          outline: 2px solid transparent;
+          outline-offset: 2px;
+          border-color: var(--input-focus-border);
+          box-shadow: 0 0 0 2px var(--bg-color), 0 0 0 4px var(--input-focus-border);
+      }
+
+      textarea {
+          min-height: 120px;
+          resize: vertical;
+      }
+
+      button {
+          padding: 0.625rem 1rem;
+          border: none;
+          border-radius: 0.375rem;
+          background-color: var(--button-bg);
+          color: var(--button-text);
+          font-weight: 600;
+          font-size: 0.875rem;
+          cursor: pointer;
+          transition: background-color 0.2s;
+          align-self: flex-start;
+      }
+
+      button:hover {
+          background-color: var(--button-hover-bg);
+      }
+      
+      button:disabled {
+          background-color: var(--button-disabled-bg);
+          cursor: not-allowed;
+      }
+
+      .output-area .result-title {
+          font-weight: 600;
+      }
+
+      .output-area pre {
+          background-color: var(--pre-bg);
+          padding: 1rem;
+          border-radius: 0.375rem;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+          font-family: "SF Mono", "Fira Code", "Source Code Pro", monospace;
+          font-size: 0.875rem;
+          max-height: 250px;
+          overflow-y: auto;
+      }
+      
+      .output-area canvas {
+          width: 100%;
+          height: auto;
+          aspect-ratio: 1;
+          image-rendering: pixelated;
+          border: 1px solid var(--border-color);
+          border-radius: 0.25rem;
+          max-width: 100%;
+      }
+      
+      audio {
+          width: 100%;
+      }
+
+      .slider-group {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+      }
+      .slider-group span {
+          font-size: 0.875rem;
+          min-width: 30px;
+      }
+
+      .button-group {
+          display: flex;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+      }
+
+      .status-text {
+          font-size: 0.875rem;
+          color: var(--subtitle-color);
+          min-height: 1.2em;
+      }
+
+      .result-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+      }
+
+      .copy-btn, .download-btn {
+          padding: 0.5rem 0.875rem;
+          font-size: 0.875rem;
+          background-color: var(--button-bg);
+          color: var(--button-text);
+          border: none;
+          border-radius: 0.375rem;
+          cursor: pointer;
+          text-decoration: none;
+          display: inline-block;
+          font-weight: 600;
+          transition: background-color 0.2s;
+      }
+
+      .copy-btn:hover, .download-btn:hover {
+          background-color: var(--button-hover-bg);
+      }
+
+      .audio-controls {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+      }
+      .audio-controls audio {
+          flex-grow: 1;
+      }
+      .tooltip {
+          position: absolute;
+          padding: 0.5rem;
+          background-color: var(--card-bg);
+          border: 1px solid var(--border-color);
+          border-radius: 0.375rem;
+          font-size: 0.75rem;
+          font-family: "SF Mono", "Fira Code", "Source Code Pro", monospace;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+          pointer-events: none;
+          z-index: 100;
+          display: none;
+      }
+      .canvas-container {
+          position: relative;
+          display: block;
+          width: 100%;
+      }
+      .output-section {
+          display: none;
+          margin-top: 1rem;
+      }
+      .output-section.visible {
+          display: block;
+      }
+      details {
+          margin-top: 1rem;
+      }
+      summary {
+          cursor: pointer;
+          font-weight: 500;
+          font-size: 0.875rem;
+          color: var(--subtitle-color);
+          user-select: none;
+      }
+      details[open] summary {
+          margin-bottom: 0.5rem;
+      }
+      .checkbox-group {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          margin-bottom: 0.5rem;
+      }
+      .checkbox-group input[type="checkbox"] {
+          width: auto;
+      }
+      .file-input-wrapper {
+          position: relative;
+          overflow: hidden;
+          display: inline-block;
+      }
+      .file-input-wrapper input[type="file"] {
+          position: absolute;
+          left: -9999px;
+      }
+      .file-input-label {
+          display: inline-block;
+          padding: 0.625rem 1rem;
+          background-color: var(--input-bg);
+          border: 1px solid var(--input-border);
+          border-radius: 0.375rem;
+          font-size: 0.875rem;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+      }
+      .file-input-label:hover {
+          background-color: var(--pre-bg);
+          border-color: var(--input-focus-border);
+      }
+      .segments-container {
+          margin-top: 1rem;
+          font-size: 0.875rem;
+      }
+      .segment-item {
+          background-color: var(--input-bg);
+          border: 1px solid var(--border-color);
+          border-radius: 0.375rem;
+          padding: 0.75rem;
+          margin-bottom: 0.5rem;
+      }
+      .segment-meta {
+          color: var(--subtitle-color);
+          font-size: 0.75rem;
+          margin-top: 0.25rem;
+      }
+      .language-text {
+          display: inline-block;
+          color: var(--subtitle-color);
+          font-size: 0.875rem;
+          font-weight: 500;
+          margin-left: 0.5rem;
+      }
+  </style>
+</head>
+<body>
+  <header>
+      <h1>portable open ai testing</h1>
+  </header>
+
+  <main>
+      <!-- Test 1: Conversation -->
+      <section class="test-grid">
+          <div class="explainer">
+              <h2>Chat Completions</h2>
+              <p>A simple conversation with a bot. Uses the Chat Completions API to generate a response to your query.</p>
+          </div>
+          <div class="input-area">
+              <label for="chatInput">Your Message:</label>
+              <textarea id="chatInput" placeholder="e.g., Explain the theory of relativity in simple terms.">Hello, world!</textarea>
+              <p id="chatTokenInfo" class="status-text" style="display: none;">Input tokens: <span id="chatTokenCount"></span></p>
+              <details>
+                  <summary>Advanced</summary>
+                  <div class="checkbox-group">
+                      <input type="checkbox" id="enableTools">
+                      <label for="enableTools">Enable tool calling</label>
+                  </div>
+                  <label for="toolsInput">Tools (JSON format):</label>
+                  <textarea id="toolsInput">[{"type": "function", "function": {"name": "get_weather", "description": "Get weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}}}}]</textarea>
+              </details>
+              <button id="chatSubmit">Send</button>
+          </div>
+          <div class="output-area">
+              <div id="responseSection">
+                  <span class="result-title">Bot's Response:</span>
+                  <pre id="chatOutput">...</pre>
+              </div>
+              <div id="reasoningSection" class="output-section">
+                  <span class="result-title">Reasoning:</span>
+                  <pre id="reasoningOutput">...</pre>
+              </div>
+              <div id="toolSection" class="output-section">
+                  <span class="result-title">Tool Calls:</span>
+                  <pre id="toolOutput">...</pre>
+              </div>
+              <div id="functionSection" class="output-section">
+                  <span class="result-title">Function Call:</span>
+                  <pre id="functionOutput">...</pre>
+              </div>
+              <p id="responseTokenSection" class="status-text" style="display: none; margin-top: 1rem;">Response tokens: <span id="responseTokenCount"></span></p>
+          </div>
+      </section>
+
+      <!-- Test 2: Transcription -->
+      <section class="test-grid">
+          <div class="explainer">
+              <h2>Audio Transcription</h2>
+              <p>Transcribe audio to text using the <b>whisper</b> model. Record from your microphone or upload a file.</p>
+          </div>
+          <div class="input-area">
+              <label>Upload Audio File:</label>
+              <div class="file-input-wrapper">
+                  <label for="audioFile" class="file-input-label">Choose File</label>
+                  <input type="file" id="audioFile" accept="audio/*">
+              </div>
+              <span id="fileName" style="margin-left: 0.5rem; font-size: 0.875rem; color: var(--subtitle-color);"></span>
+              <audio id="uploadedAudioPlayer" controls style="display: none; width: 100%; margin-top: 0.5rem;"></audio>
+              <button id="transcribeSubmit" style="margin-top: 1rem;">Transcribe</button>
+              <label style="margin-top: 1rem;">Or Record Audio:</label>
+              <div class="button-group">
+                  <button id="recordButton">Record</button>
+              </div>
+              <audio id="recordedAudioPlayer" controls style="display: none; width: 100%; margin-top: 0.5rem;"></audio>
+              <p id="recordStatus" class="status-text"></p>
+          </div>
+          <div class="output-area">
+              <div class="result-header">
+                  <div>
+                    <span class="result-title">Transcription</span>
+                    <span id="languageBadge" class="language-text" style="display: none;"></span>
+                  </div>
+                  <button id="copyTranscriptionBtn" class="copy-btn" title="Copy to clipboard">Copy</button>
+              </div>
+              <pre id="transcriptionOutput">...</pre>
+              <div id="segmentsContainer" class="segments-container" style="display: none;">
+                  <div class="result-title" style="margin-bottom: 0.5rem;">Segments:</div>
+                  <div id="segmentsList"></div>
+              </div>
+          </div>
+      </section>
+
+      <!-- Test 3: Text-to-Speech -->
+      <section class="test-grid">
+          <div class="explainer">
+              <h2>Text-to-Speech</h2>
+              <p>Convert text into speech using the <b>kokoro</b> model. Select a voice and speed, then play or download the audio.</p>
+          </div>
+          <div class="input-area">
+              <label for="ttsInput">Text:</label>
+              <textarea id="ttsInput" placeholder="Enter text to synthesize...">Welcome to the future of voice synthesis.</textarea>
+              <label for="ttsVoice">Voice:</label>
+              <select id="ttsVoice">
+                  <optgroup label="American Female">
+                      <option value="af_heart" selected>Heart (Default)</option>
+                      <option value="af">Mixed (Bella + Sarah)</option>
+                      <option value="af_bella">Bella</option>
+                      <option value="af_sarah">Sarah</option>
+                      <option value="af_nicole">Nicole</option>
+                      <option value="af_sky">Sky</option>
+                  </optgroup>
+                  <optgroup label="American Male">
+                      <option value="am_adam">Adam</option>
+                      <option value="am_michael">Michael</option>
+                  </optgroup>
+                  <optgroup label="British Female">
+                      <option value="bf_emma">Emma</option>
+                      <option value="bf_isabella">Isabella</option>
+                  </optgroup>
+                  <optgroup label="British Male">
+                      <option value="bm_george">George</option>
+                      <option value="bm_lewis">Lewis</option>
+                  </optgroup>
+              </select>
+              <label for="ttsSpeed">Speed:</label>
+               <div class="slider-group">
+                  <input type="range" id="ttsSpeed" min="0.5" max="2.0" value="1.0" step="0.05">
+                  <span id="ttsSpeedValue">1.0x</span>
+              </div>
+              <button id="ttsSubmit">Generate Speech</button>
+          </div>
+          <div class="output-area">
+               <span class="result-title">Generated Audio:</span>
+               <div class="audio-controls">
+                  <audio id="ttsAudio" controls></audio>
+                  <a id="downloadTtsBtn" class="download-btn" href="#" download="speech.mp3" style="display: none;">Download</a>
+              </div>
+              <div id="ttsError" style="color: #ef4444;"></div>
+          </div>
+      </section>
+
+      <!-- Test 4: Embeddings -->
+      <section class="test-grid">
+          <div class="explainer">
+              <h2>Embeddings</h2>
+              <p>Generate a vector embedding for text using the <b>e5-large</b> model. The embedding is shown as raw JSON and visualized as a 32x32 pixel map.</p>
+          </div>
+          <div class="input-area">
+              <label for="embedInput">Text:</label>
+              <textarea id="embedInput" placeholder="Enter text to embed...">Open source is the best way to build and ship for the web.</textarea>
+              <p id="embedTokenInfo" class="status-text" style="display: none;">Input tokens: <span id="embedTokenCount"></span></p>
+              <button id="embedSubmit">Generate Embedding</button>
+          </div>
+          <div class="output-area">
+              <span class="result-title">Embedding Visualization (32x32):</span>
+              <div class="canvas-container">
+                  <canvas id="embedCanvas" width="32" height="32"></canvas>
+              </div>
+              <div class="result-header">
+                  <span class="result-title">Embedding JSON:</span>
+                  <button id="copyEmbedBtn" class="copy-btn" title="Copy to clipboard">Copy</button>
+              </div>
+              <pre id="embedOutput">...</pre>
+          </div>
+      </section>
+
+      <!-- Test 5: Embedding Difference -->
+      <section class="test-grid">
+          <div class="explainer">
+              <h2>Embedding Difference</h2>
+              <p>Calculates and visualizes the vector difference between the embeddings of two texts. The result is a 32x32 map showing the element-wise subtraction.</p>
+          </div>
+          <div class="input-area">
+              <label for="embedDiffInput1">Text 1:</label>
+              <textarea id="embedDiffInput1">The quick brown fox jumps over the lazy dog.</textarea>
+              <label for="embedDiffInput2">Text 2:</label>
+              <textarea id="embedDiffInput2">A fast, dark-colored fox leaps above a sleeping canine.</textarea>
+              <button id="embedDiffSubmit">Calculate Difference</button>
+          </div>
+          <div class="output-area">
+              <span class="result-title">Difference Visualization (32x32):</span>
+              <div class="canvas-container">
+                  <canvas id="embedDiffCanvas" width="32" height="32"></canvas>
+              </div>
+              <span class="result-title">Cosine Similarity:</span>
+              <pre id="cosineOutput">...</pre>
+          </div>
+      </section>
+  </main>
+
+  <script>
+      (function() {
+          // --- Basic Setup & Theme ---
+          const theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+
+          // --- API Configuration ---
+          const API_BASE_URL = "/v1";
+
+          // Test 1: Chat
+          const chatInput = document.getElementById('chatInput');
+          const chatSubmit = document.getElementById('chatSubmit');
+          const chatOutput = document.getElementById('chatOutput');
+          const reasoningSection = document.getElementById('reasoningSection');
+          const reasoningOutput = document.getElementById('reasoningOutput');
+          const toolSection = document.getElementById('toolSection');
+          const toolOutput = document.getElementById('toolOutput');
+          const functionSection = document.getElementById('functionSection');
+          const functionOutput = document.getElementById('functionOutput');
+          const enableTools = document.getElementById('enableTools');
+          const toolsInput = document.getElementById('toolsInput');
+          
+          // Test 2: Transcription
+          const audioFileInput = document.getElementById('audioFile');
+          const recordButton = document.getElementById('recordButton');
+          const recordStatus = document.getElementById('recordStatus');
+          const transcribeSubmit = document.getElementById('transcribeSubmit');
+          const transcriptionOutput = document.getElementById('transcriptionOutput');
+          const copyTranscriptionBtn = document.getElementById('copyTranscriptionBtn');
+          const uploadedAudioPlayer = document.getElementById('uploadedAudioPlayer');
+          const recordedAudioPlayer = document.getElementById('recordedAudioPlayer');
+          const fileName = document.getElementById('fileName');
+          const languageBadge = document.getElementById('languageBadge');
+          const segmentsContainer = document.getElementById('segmentsContainer');
+          const segmentsList = document.getElementById('segmentsList');
+
+          // Test 3: TTS
+          const ttsInput = document.getElementById('ttsInput');
+          const ttsVoice = document.getElementById('ttsVoice');
+          const ttsSpeed = document.getElementById('ttsSpeed');
+          const ttsSpeedValue = document.getElementById('ttsSpeedValue');
+          const ttsSubmit = document.getElementById('ttsSubmit');
+          const ttsAudio = document.getElementById('ttsAudio');
+          const downloadTtsBtn = document.getElementById('downloadTtsBtn');
+          const ttsError = document.getElementById('ttsError');
+          
+          // Test 4: Embedding
+          const embedInput = document.getElementById('embedInput');
+          const embedSubmit = document.getElementById('embedSubmit');
+          const embedCanvas = document.getElementById('embedCanvas');
+          const embedOutput = document.getElementById('embedOutput');
+          const copyEmbedBtn = document.getElementById('copyEmbedBtn');
+
+          // Test 5: Embedding Difference
+          const embedDiffInput1 = document.getElementById('embedDiffInput1');
+          const embedDiffInput2 = document.getElementById('embedDiffInput2');
+          const embedDiffSubmit = document.getElementById('embedDiffSubmit');
+          const embedDiffCanvas = document.getElementById('embedDiffCanvas');
+          const cosineOutput = document.getElementById('cosineOutput');
+
+          // --- Helper Functions ---
+
+          function getHeaders() {
+              const headers = { 'Content-Type': 'application/json' };
+              return headers;
+          }
+
+          async function performApiCall(endpoint, options, button, outputElement) {
+              const originalButtonText = button.textContent;
+              button.disabled = true;
+              button.textContent = 'Loading...';
+              if(outputElement) outputElement.textContent = '...';
+              
+              try {
+                  const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+                  if (!response.ok) {
+                      const errorText = await response.text();
+                      throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
+                  }
+                  return response;
+              } catch (error) {
+                  console.error(error);
+                  if (outputElement) outputElement.textContent = `Error: ${error.message}`;
+                  if (endpoint.includes('speech')) ttsError.textContent = `Error: ${error.message}`;
+                  return null;
+              } finally {
+                  button.disabled = false;
+                  button.textContent = originalButtonText;
+              }
+          }
+
+          function setupCopyButton(button, sourceElement) {
+              button.addEventListener('click', () => {
+                  navigator.clipboard.writeText(sourceElement.textContent).then(() => {
+                      const originalText = button.textContent;
+                      button.textContent = 'Copied!';
+                      setTimeout(() => { button.textContent = originalText; }, 2000);
+                  }, (err) => {
+                      console.error('Could not copy text: ', err);
+                  });
+              });
+          }
+
+          // Reset token info when input changes
+          chatInput.addEventListener('input', () => {
+              document.getElementById('chatTokenInfo').style.display = 'none';
+              document.getElementById('responseTokenSection').style.display = 'none';
+          });
+
+          // --- Test 1: Chat Completions ---
+          chatSubmit.addEventListener('click', async () => {
+              const requestBody = {
+                  model: 'qwen3-8b',
+                  messages: [{ role: 'user', content: chatInput.value }],
+              };
+              
+              if (enableTools.checked && toolsInput.value.trim()) {
+                  try {
+                      requestBody.tools = JSON.parse(toolsInput.value);
+                      requestBody.tool_choice = 'auto';
+                  } catch (e) {
+                      chatOutput.textContent = `Error parsing tools JSON: ${e.message}`;
+                      return;
+                  }
+              }
+              
+              const options = {
+                  method: 'POST',
+                  headers: getHeaders(),
+                  body: JSON.stringify(requestBody),
+              };
+              const response = await performApiCall('/chat/completions', options, chatSubmit, chatOutput);
+              if (response) {
+                  const data = await response.json();
+                  const responseContent = data.choices[0].message.content?.trim() || '';
+                  const responseSection = document.getElementById('responseSection');
+                  
+                  if (responseContent) {
+                    chatOutput.textContent = responseContent;
+                    responseSection.style.display = 'block';
+                  } else {
+                    responseSection.style.display = 'none';
+                  }
+                  
+                  // Display token usage
+                  if (data.usage) {
+                    document.getElementById('chatTokenCount').textContent = data.usage.prompt_tokens;
+                    document.getElementById('chatTokenInfo').style.display = 'block';
+                    
+                    // Add response tokens at the bottom
+                    const responseTokenSection = document.getElementById('responseTokenSection');
+                    if (responseTokenSection) {
+                      document.getElementById('responseTokenCount').textContent = data.usage.completion_tokens;
+                      responseTokenSection.style.display = 'block';
+                    }
+                  }
+                  
+                  if (data.choices[0].message.reasoning_content) {
+                    reasoningOutput.textContent = data.choices[0].message.reasoning_content.trim();
+                    reasoningSection.classList.add('visible');
+                  } else {
+                    reasoningSection.classList.remove('visible');
+                  }
+                  if (data.choices[0].message.tool_calls) {
+                    toolOutput.textContent = JSON.stringify(data.choices[0].message.tool_calls, null, 2);
+                    toolSection.classList.add('visible');
+                  } else {
+                    toolSection.classList.remove('visible');
+                  }
+                  if (data.choices[0].message.function_call) {
+                    functionOutput.textContent = JSON.stringify(data.choices[0].message.function_call, null, 2);
+                    functionSection.classList.add('visible');
+                  } else {
+                    functionSection.classList.remove('visible');
+                  }
+              }
+          });
+
+          // --- Test 2: Transcription ---
+          let mediaRecorder;
+          let audioChunks = [];
+          let recordedAudioFile = null;
+
+          // Handle audio file upload - show player for inspection
+          audioFileInput.addEventListener('change', (e) => {
+              const file = e.target.files[0];
+              if (file) {
+                  const url = URL.createObjectURL(file);
+                  uploadedAudioPlayer.src = url;
+                  uploadedAudioPlayer.style.display = 'block';
+                  fileName.textContent = file.name;
+                  recordedAudioFile = null; // Clear any recorded audio
+                  recordedAudioPlayer.style.display = 'none'; // Hide recorded audio player
+              } else {
+                  fileName.textContent = '';
+                  uploadedAudioPlayer.style.display = 'none';
+              }
+          });
+
+          recordButton.addEventListener('click', async () => {
+              if (mediaRecorder && mediaRecorder.state === 'recording') {
+                  mediaRecorder.stop();
+                  recordButton.textContent = 'Record';
+                  recordStatus.textContent = 'Processing recording...';
+                  return;
+              }
+
+              try {
+                  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                  audioChunks = [];
+                  mediaRecorder = new MediaRecorder(stream);
+                  mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+                  mediaRecorder.onstop = async () => {
+                      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                      recordedAudioFile = new File([audioBlob], "recording.webm", { type: 'audio/webm' });
+                      
+                      // Show recorded audio player
+                      const url = URL.createObjectURL(audioBlob);
+                      recordedAudioPlayer.src = url;
+                      recordedAudioPlayer.style.display = 'block';
+                      
+                      // Stop all tracks to turn off the microphone indicator
+                      stream.getTracks().forEach(track => track.stop());
+                      
+                      // Auto-transcribe after recording
+                      recordStatus.textContent = 'Transcribing...';
+                      await performTranscription();
+                  };
+                  mediaRecorder.start();
+                  recordButton.textContent = 'Stop Recording';
+                  recordStatus.textContent = 'Recording...';
+                  audioFileInput.value = ''; // Clear file input if user decides to record
+                  fileName.textContent = ''; // Clear file name display
+                  uploadedAudioPlayer.style.display = 'none'; // Hide uploaded audio player
+                  recordedAudioFile = null;
+              } catch (err) {
+                  console.error("Error accessing microphone:", err);
+                  recordStatus.textContent = `Error: ${err.message}`;
+              }
+          });
+
+          async function performTranscription() {
+              const fileToSubmit = recordedAudioFile || audioFileInput.files[0];
+              if (!fileToSubmit) {
+                  transcriptionOutput.textContent = 'Please record or select an audio file first.';
+                  return;
+              }
+
+              const formData = new FormData();
+              formData.append('file', fileToSubmit);
+              formData.append('model', 'whisper');
+              formData.append('response_format', 'verbose_json'); // Request detailed response
+
+              const headers = {};
+              const options = { method: 'POST', headers, body: formData };
+              const response = await performApiCall('/audio/transcriptions', options, transcribeSubmit, transcriptionOutput);
+              if (response) {
+                  const data = await response.json();
+                  transcriptionOutput.textContent = data.text;
+                  
+                  // Show language
+                  if (data.language) {
+                      languageBadge.textContent = `${data.language.toUpperCase()}`;
+                      languageBadge.style.display = 'inline-block';
+                  } else {
+                      languageBadge.style.display = 'none';
+                  }
+                  
+                  // Show segments if available
+                  if (data.segments && data.segments.length > 0) {
+                      segmentsContainer.style.display = 'block';
+                      segmentsList.innerHTML = data.segments.map(segment => {
+                          const duration = (segment.end - segment.start).toFixed(2);
+                          return `
+                              <div class="segment-item">
+                                  <div>${segment.text}</div>
+                                  <div class="segment-meta">
+                                      Time: ${segment.start.toFixed(2)}s - ${segment.end.toFixed(2)}s (${duration}s) | 
+                                      Tokens: ${segment.tokens ? segment.tokens.length : 'N/A'} | 
+                                      Avg Log Prob: ${segment.avg_logprob ? segment.avg_logprob.toFixed(4) : 'N/A'}
+                                  </div>
+                              </div>
+                          `;
+                      }).join('');
+                  } else {
+                      segmentsContainer.style.display = 'none';
+                  }
+              }
+              if (recordedAudioFile) {
+                  recordedAudioFile = null; // Reset after use only if it was a recording
+                  recordStatus.textContent = '';
+              }
+          }
+
+          transcribeSubmit.addEventListener('click', performTranscription);
+
+          setupCopyButton(copyTranscriptionBtn, transcriptionOutput);
+
+          // --- Test 3: Text-to-Speech ---
+          ttsSpeed.addEventListener('input', () => {
+              ttsSpeedValue.textContent = `${parseFloat(ttsSpeed.value).toFixed(2)}x`;
+          });
+
+          ttsSubmit.addEventListener('click', async () => {
+              ttsError.textContent = '';
+              ttsAudio.src = '';
+              downloadTtsBtn.style.display = 'none';
+              
+              const options = {
+                  method: 'POST',
+                  headers: getHeaders(),
+                  body: JSON.stringify({
+                      model: 'kokoro',
+                      input: ttsInput.value,
+                      voice: ttsVoice.value,
+                      speed: parseFloat(ttsSpeed.value)
+                  }),
+              };
+              const response = await performApiCall('/audio/speech', options, ttsSubmit, null);
+              if (response) {
+                  const audioBlob = await response.blob();
+                  const audioUrl = URL.createObjectURL(audioBlob);
+                  ttsAudio.src = audioUrl;
+                  downloadTtsBtn.href = audioUrl;
+                  downloadTtsBtn.style.display = 'inline-block';
+              }
+          });
+          
+          // --- Embedding Visualization Logic ---
+          const colorPalette = [
+            { "position": -1, "color": "#ed333b" },
+            { "position": -0.31, "color": "#ff7800" },
+            { "position": -0.11, "color": "#f8e45c" },
+            { "position": 0, "color": "#241f31" },
+            { "position": 0.1, "color": "#8ff0a4" },
+            { "position": 0.3, "color": "#1a5fb4" },
+            { "position": 1, "color": "#ff00ff" }
+          ] ;
+          
+          const parsedPalette = colorPalette.map(p => ({ ...p, rgb: hexToRgb(p.color) }));
+
+          function hexToRgb(hex) {
+              const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+              return result ? {
+                  r: parseInt(result[1], 16),
+                  g: parseInt(result[2], 16),
+                  b: parseInt(result[3], 16)
+              } : null;
+          }
+
+          function lerp(a, b, t) {
+              return a + (b - a) * t;
+          }
+
+          function getColorForValue(value) {
+              for (let i = 0; i < parsedPalette.length - 1; i++) {
+                  const stop1 = parsedPalette[i];
+                  const stop2 = parsedPalette[i + 1];
+                  if (value >= stop1.position && value <= stop2.position) {
+                      const t = (value - stop1.position) / (stop2.position - stop1.position);
+                      const r = Math.round(lerp(stop1.rgb.r, stop2.rgb.r, t));
+                      const g = Math.round(lerp(stop1.rgb.g, stop2.rgb.g, t));
+                      const b = Math.round(lerp(stop1.rgb.b, stop2.rgb.b, t));
+                      return { r, g, b };
+                  }
+              }
+              return value < 0 ? parsedPalette[0].rgb : parsedPalette[parsedPalette.length - 1].rgb;
+          }
+
+          function cosineSimilarity(vec1, vec2) {
+              let dotProduct = 0;
+              let norm1 = 0;
+              let norm2 = 0;
+              for (let i = 0; i < vec1.length; i++) {
+                  dotProduct += vec1[i] * vec2[i];
+                  norm1 += vec1[i] * vec1[i];
+                  norm2 += vec2[i] * vec2[i];
+              }
+              return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
+          }
+
+          function drawEmbedding(canvas, embeddingVector, isDiff = false) {
+              const ctx = canvas.getContext('2d');
+              if (!embeddingVector || embeddingVector.length !== 1024) {
+                  ctx.clearRect(0, 0, canvas.width, canvas.height);
+                  console.error("Embedding vector must have 1024 dimensions for a 32x32 grid.");
+                  return;
+              }
+
+              const imageData = ctx.createImageData(32, 32);
+              for (let i = 0; i < 1024; i++) {
+                  const value = isDiff ? embeddingVector[i] / 2 : embeddingVector[i];
+                  const color = getColorForValue(Math.max(-1, Math.min(1, value)));
+                  const pixelIndex = i * 4;
+                  imageData.data[pixelIndex] = color.r;
+                  imageData.data[pixelIndex + 1] = color.g;
+                  imageData.data[pixelIndex + 2] = color.b;
+                  imageData.data[pixelIndex + 3] = 255;
+              }
+              ctx.putImageData(imageData, 0, 0);
+          }
+
+          async function getEmbedding(text, button, output) {
+              const options = {
+                  method: 'POST',
+                  headers: getHeaders(),
+                  body: JSON.stringify({
+                      model: 'e5-large',
+                      input: text,
+                  }),
+              };
+              const response = await performApiCall('/embeddings', options, button, output);
+              if (response) {
+                  const data = await response.json();
+                  // Store the usage data for display
+                  if (button === embedSubmit && data.usage) {
+                      document.getElementById('embedTokenCount').textContent = data.usage.prompt_tokens;
+                      document.getElementById('embedTokenInfo').style.display = 'block';
+                  }
+                  return data.data[0].embedding;
+              }
+              return null;
+          }
+
+          function setupCanvasTooltip(canvas, dataGetter) {
+              const tooltip = document.createElement('div');
+              tooltip.className = 'tooltip';
+              document.body.appendChild(tooltip);
+              
+              canvas.addEventListener('mousemove', (e) => {
+                  const rect = canvas.getBoundingClientRect();
+                  const x = Math.floor((e.clientX - rect.left) * 32 / rect.width);
+                  const y = Math.floor((e.clientY - rect.top) * 32 / rect.height);
+                  
+                  if (x >= 0 && x < 32 && y >= 0 && y < 32) {
+                      const data = dataGetter(x, y);
+                      if (data) {
+                          tooltip.innerHTML = data;
+                          tooltip.style.display = 'block';
+                          tooltip.style.left = (e.pageX - tooltip.offsetWidth - 10) + 'px';
+                          tooltip.style.top = e.pageY + 10 + 'px';
+                      }
+                  }
+              });
+              
+              canvas.addEventListener('mouseleave', () => {
+                  tooltip.style.display = 'none';
+              });
+          }
+
+          // Reset token info when input changes
+          embedInput.addEventListener('input', () => {
+              document.getElementById('embedTokenInfo').style.display = 'none';
+          });
+
+          // --- Test 4: Embedding ---
+          let currentEmbedding = null;
+          embedSubmit.addEventListener('click', async () => {
+              const embedding = await getEmbedding(embedInput.value, embedSubmit, embedOutput);
+              if (embedding) {
+                  currentEmbedding = embedding;
+                  embedOutput.textContent = JSON.stringify(embedding, null, 2);
+                  drawEmbedding(embedCanvas, embedding);
+              }
+          });
+          setupCopyButton(copyEmbedBtn, embedOutput);
+          
+          setupCanvasTooltip(embedCanvas, (x, y) => {
+              if (!currentEmbedding) return null;
+              const idx = y * 32 + x;
+              return `Value: ${currentEmbedding[idx].toFixed(4)}<br>Index: ${idx}`;
+          });
+
+          // --- Test 5: Embedding Difference ---
+          let embedding1Cache = null;
+          let embedding2Cache = null;
+          let diffVectorCache = null;
+          
+          embedDiffSubmit.addEventListener('click', async () => {
+              embedDiffSubmit.disabled = true;
+              embedDiffSubmit.textContent = 'Loading...';
+              
+              try {
+                  // We call the helper directly to manage the button state across two calls
+                  const [embedding1, embedding2] = await Promise.all([
+                      getEmbedding(embedDiffInput1.value, embedDiffSubmit, null),
+                      getEmbedding(embedDiffInput2.value, embedDiffSubmit, null)
+                  ]);
+
+                  if (embedding1 && embedding2) {
+                      if (embedding1.length !== embedding2.length) {
+                           throw new Error("Embeddings have different dimensions.");
+                      }
+                      embedding1Cache = embedding1;
+                      embedding2Cache = embedding2;
+                      const diffVector = embedding1.map((val, i) => val - embedding2[i]);
+                      diffVectorCache = diffVector;
+                      drawEmbedding(embedDiffCanvas, diffVector, true);
+                      
+                      const similarity = cosineSimilarity(embedding1, embedding2);
+                      const cosineDiff = 1 - similarity;
+                      cosineOutput.textContent = `Cosine Similarity: ${similarity.toFixed(4)}\nCosine Difference: ${cosineDiff.toFixed(4)}`;
+                  }
+              } catch(e) {
+                  console.error(e);
+              } finally {
+                  embedDiffSubmit.disabled = false;
+                  embedDiffSubmit.textContent = 'Calculate Difference';
+              }
+          });
+          
+          setupCanvasTooltip(embedDiffCanvas, (x, y) => {
+              if (!embedding1Cache || !embedding2Cache || !diffVectorCache) return null;
+              const idx = y * 32 + x;
+              return `Text 1: ${embedding1Cache[idx].toFixed(4)}<br>Text 2: ${embedding2Cache[idx].toFixed(4)}<br>Difference: ${diffVectorCache[idx].toFixed(4)}`;
+          });
+
+      })();
+  </script>
+</body>
+</html>
+
