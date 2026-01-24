@@ -3,18 +3,48 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    flake-utils.url = "github:numtide/flake-utils";
+
+    nix-hug = {
+      url = "github:longregen/nix-hug";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-utils.follows = "flake-utils";
+      };
+    };
+
+    speaches = {
+      url = "github:longregen/speaches";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        nix-hug.follows = "nix-hug";
+        flake-utils.follows = "flake-utils";
+      };
+    };
   };
 
   outputs =
-    { self, nixpkgs }:
+    { self, nixpkgs, flake-utils, nix-hug, speaches }:
     let
       supportedSystems = [
         "x86_64-linux"
         "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+
+      # Portable Open AI NixOS configuration (x86_64-linux only)
+      portableOpenAiSystem = nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        modules = [ ./portable-open-ai/default.nix ];
+        specialArgs = {
+          nix-hug-lib = nix-hug.lib.x86_64-linux;
+          speachesPackage = speaches.packages.x86_64-linux.default;
+        };
+      };
     in
     {
+      nixosConfigurations.portable-open-ai = portableOpenAiSystem;
       overlays.default = final: prev: {
         geoip-countrylist = final.callPackage ./packages/geoip-countrylist.nix { };
         verdaccio = final.callPackage ./packages/verdaccio.nix { };
@@ -29,10 +59,17 @@
           verdaccio = pkgs.callPackage ./packages/verdaccio.nix { };
           default = self.packages.${system}.geoip-countrylist;
         }
+        // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
+          # Bootable portable Open AI inference image
+          # Build: nix build .#portable-open-ai-image
+          # Write: sudo dd if=result/iso/*.iso of=/dev/sdX bs=4M status=progress
+          portable-open-ai-image = portableOpenAiSystem.config.system.build.isoImage;
+        }
       );
 
       nixosModules = {
         # Server-side service modules
+        ai-server = import ./modules/ai-server;
         firewall-by-country = import ./modules/firewall-by-country.nix;
         docker-cache = import ./modules/docker-cache.nix;
         pypi-cache = import ./modules/pypi-cache.nix;
