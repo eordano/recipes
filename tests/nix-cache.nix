@@ -100,6 +100,7 @@ let
             for f in files:
                 rel_path = os.path.relpath(os.path.join(root, f), CACHE_DIR)
                 logger.info(f"  Available: {rel_path}")
+        socketserver.TCPServer.allow_reuse_address = True
         with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as httpd:
             logger.info("Server started successfully")
             httpd.serve_forever()

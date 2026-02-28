@@ -1,9 +1,9 @@
-{ lib, pkgs, writeShellScriptBin, python3 }:
+{ lib, writeShellScriptBin, writeText, python3 }:
 
 # Lightweight Verdaccio mock for testing
 # This is a simple HTTP server that proxies npm registry requests
 writeShellScriptBin "verdaccio" ''
-  exec ${python3}/bin/python3 ${pkgs.writeText "verdaccio-mock.py" ''
+  exec ${python3}/bin/python3 ${writeText "verdaccio-mock.py" ''
     #!/usr/bin/env python3
     import http.server
     import socketserver
@@ -26,12 +26,18 @@ writeShellScriptBin "verdaccio" ''
             config_path = sys.argv[2] if len(sys.argv) > 2 else None
             if config_path and Path(config_path).exists():
                 with open(config_path) as f:
-                    for line in f:
-                        if 'url:' in line and 'uplinks' in open(config_path).read()[:open(config_path).read().find(line)]:
-                            match = re.search(r'url:\s*(.+)', line)
-                            if match:
-                                upstream = match.group(1).strip()
-                                break
+                    content = f.read()
+                in_uplinks = False
+                for line in content.splitlines():
+                    if 'uplinks:' in line:
+                        in_uplinks = True
+                    elif in_uplinks and 'url:' in line:
+                        match = re.search(r'url:\s*(.+)', line)
+                        if match:
+                            upstream = match.group(1).strip()
+                            break
+                    elif line and not line[0].isspace():
+                        in_uplinks = False
 
             url = upstream + self.path
             self.log_message("Proxying GET %s", url)
@@ -75,8 +81,8 @@ writeShellScriptBin "verdaccio" ''
                         port = int(match.group(2))
 
     print(f"Starting Verdaccio mock on {host}:{port}")
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer((host, port), VerdaccioHandler) as httpd:
-        httpd.allow_reuse_address = True
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:

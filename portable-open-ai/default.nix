@@ -17,50 +17,40 @@
   speachesPackage,
   ...
 }: let
-  # Model definitions
+  # Model definitions (pinned to commit hashes via nix-hug v4)
   qwen3Model = nix-hug-lib.fetchModel {
     url = "Orion-zhen/Qwen3-8B-AWQ";
-    rev = "main";
-    repoInfoHash = "sha256-/6CP2onh6rtkE1utMHveYfyNfFAYkP8YNUsj7i7I7Dk=";
+    rev = "afb67fde7957c0e416d98b86df596016d94ea882";
     fileTreeHash = "sha256-C/Cu3FE5+43vLse0qZqbvIwL31DcbbE6M8ocGA4qo/A=";
-    derivationHash = "sha256-8tEMYzkVQrD/I51Hgoq9FehBqjlnVXGU111it+fV724=";
   };
 
   e5Model = nix-hug-lib.fetchModel {
     url = "intfloat/multilingual-e5-large-instruct";
-    rev = "main";
-    repoInfoHash = "sha256-/q3/WbW+SyQycGnGK8mFKzUdSYjGRsCU4wC3WTas6H4=";
-    fileTreeHash = "sha256-cCAGFCDddzZdHYBdwTWTjHXZ6HJXtvVAT/BkNKnz4z0=";
-    derivationHash = "sha256-7nz1tBkxVZaFhaNDUm/rw6C6Kg6p7kH0sZZ0s5vay/E=";
+    rev = "274baa43b0e13e37fafa6428dbc7938e62e5c439";
+    fileTreeHash = "sha256-3vgrtgC8zdWvxagrld6ZkUvVrPJHSnSAxy9eS79Vwsk=";
   };
 
   whisperModel = nix-hug-lib.fetchModel {
     url = "Systran/faster-whisper-large-v3";
-    rev = "main";
-    repoInfoHash = "sha256-iu+T+R9vSxA501ap+K8WUP4a6/XxlpCkRWCbzC9LHLo=";
+    rev = "edaa852ec7e145841d8ffdb056a99866b5f0a478";
     fileTreeHash = "sha256-c9h9wTwY4rwwzFPAUilsKrhn+o8YqGudZJ/ZwOKnHmg=";
-    derivationHash = "sha256-yH67YX7tQrw2DJlK+pe7C41YSTC1WHxigAj5PZ/6yE4=";
   };
 
   kokoroModel = nix-hug-lib.fetchModel {
     url = "speaches-ai/Kokoro-82M-v1.0-ONNX";
-    rev = "main";
-    repoInfoHash = "sha256-+eumCsNLTigie1h/syJwzPnF2KR7BAgHvJnmBRQYa20=";
+    rev = "dc196c76d64fed9203906231372bcb98135815df";
     fileTreeHash = "sha256-+Aea1c28vvS+pfOs2alshOajGzW6I7ujDVIIAQ5KlgI=";
-    derivationHash = "sha256-v2BsX7lfzzytuLSTEpJccHHAyG09dzvTsF9pXYBSZOs=";
   };
 
   sileroVadModel = nix-hug-lib.fetchModel {
     url = "onnx-community/silero-vad";
-    rev = "main";
-    repoInfoHash = "sha256-nncF0+GwO1HGepLOA/DgyHZ/SZRj8aKoPjt8uEcm8V4=";
-    fileTreeHash = "sha256-f+/9fy13zID9i5mv7FwdwCs0oQskWJlJ7TK3VjOVI4A=";
-    derivationHash = "sha256-VsvDtF6TC3ZtlvU+h6VvS1X1MlSFZZCXRgBmTfcHemE=";
+    rev = "e71cae966052b992a7eca6b17738916ce0eca4ec";
+    fileTreeHash = "sha256-Ngj+Sq0vWS2MEPbOzpCoUe1iBORhDyaK2Eluq/RmUEs=";
   };
 
   models = nix-hug-lib.buildCache {
     models = [qwen3Model e5Model whisperModel kokoroModel sileroVadModel];
-    hash = "sha256-wuoKQ76K7VFSO4ExxbavKDc0I778OsL8Sywc4vbMpXI=";
+    hash = "sha256-LekAXB7m+Sf6MKAMrxFhRElVAvxcAfkZSzfhmgk+7dE=";
   };
 in {
   imports = [

@@ -8,10 +8,7 @@
 
     nix-hug = {
       url = "github:longregen/nix-hug";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
-      };
+      inputs.nixpkgs.follows = "nixpkgs";
     };
 
     speaches = {

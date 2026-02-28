@@ -118,6 +118,7 @@ let
 
     def run_server():
         logger.info(f"Starting fake PyPI server on port {PORT}")
+        socketserver.TCPServer.allow_reuse_address = True
         with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as httpd:
             logger.info("Server started successfully")
             httpd.serve_forever()

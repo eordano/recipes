@@ -630,10 +630,10 @@ in
           "[harden] disableSmt affects Nix build parallelism. Builds will be ~50% slower.";
     }
 
-    # Logrotate workaround
-    {
+    # Logrotate workaround (only when nginx is enabled and hardening is active)
+    (mkIf (config.services.nginx.enable && cfg.preset != "none") {
       services.logrotate.settings.nginx.enable = mkForce false;
-    }
+    })
 
     # Crash log directory
     (mkIf (isEnabled "crashLogs") {
