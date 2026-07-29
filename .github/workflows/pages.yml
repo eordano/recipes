@@ -1,0 +1,64 @@
+name: Deploy docs site
+
+# Build the MkDocs Material site from the recipe READMEs and publish it to
+# GitHub Pages. Enable once, under Settings → Pages → Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "modules/**"
+      - "behaviors/**"
+      - "overlays/**"
+      - "packages/**"
+      - "lib/**"
+      - "tools/**"
+      - "mkdocs.yml"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight deploy at a time; don't cancel a running publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install MkDocs Material
+        run: pip install -r tools/requirements.txt
+      - name: Check for private-data leaks
+        env:
+          LEAK_GUARD_PATTERN: ${{ secrets.LEAK_GUARD_PATTERN }}
+        run: ./leak-guard.sh
+      - name: Test site generator
+        working-directory: tools
+        run: python3 -m unittest test_gen_site.py
+      - name: Generate site source from recipe READMEs
+        run: python3 tools/gen_site.py
+      - name: Build (strict — fails on broken links / warnings)
+        run: mkdocs build --strict
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

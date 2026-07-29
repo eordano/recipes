@@ -1,0 +1,12 @@
+{
+  "name": "@example/cli",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "bin": { "example-cli": "dist/cli.js" },
+  "scripts": {
+    "build": "mkdir -p dist && printf '#!/usr/bin/env node\\n' > dist/cli.js && cat cli.js >> dist/cli.js && chmod +x dist/cli.js"
+  },
+  "dependencies": {
+    "@example/util": "workspace:*"
+  }
+}

@@ -1,0 +1,11 @@
+--- a/kernel-open/common/inc/nv-linux.h
++++ b/kernel-open/common/inc/nv-linux.h
+@@ -24,6 +24,8 @@
+ #ifndef _NV_LINUX_H_
+ #define _NV_LINUX_H_
+
++#include <linux/stdarg.h>
++
+ #include "nvstatus.h"
+ #include "nv.h"
+ #include "nv-ioctl-numa.h"

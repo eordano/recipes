@@ -1,2 +1,17 @@
-result*
-.claude
+# generated docs site
+/site/
+.cache/
+/site-src/
+
+# literate-tangle build artifact (docs/tangle.sh output)
+/tangled/
+.leak-guard-pattern
+
+# Vendoring marker written by a consuming tree's sync script: it records the
+# commit an in-tree copy was taken at. This repo is the source, not the copy,
+# so the marker must never be tracked or published here.
+.synced-from-commit
+
+# local Python test/generator artifacts
+**/__pycache__/
+*.pyc

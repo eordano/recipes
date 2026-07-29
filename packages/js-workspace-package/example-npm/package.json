@@ -1,0 +1,9 @@
+{
+  "name": "example-npm-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "license": "CC0-1.0",
+  "workspaces": [
+    "packages/*"
+  ]
+}

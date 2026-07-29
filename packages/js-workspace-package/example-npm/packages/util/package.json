@@ -1,0 +1,9 @@
+{
+  "name": "@example-npm/util",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "main": "index.js",
+  "dependencies": {
+    "is-odd": "3.0.1"
+  }
+}

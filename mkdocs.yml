@@ -1,0 +1,237 @@
+site_name: Nix Recipes
+site_description: >-
+  132 reusable recipes for NixOS and nix-darwin systems — modules,
+  overlays, and packages — each with a why-and-trap writeup.
+site_url: https://eordano.github.io/recipes/
+repo_url: https://github.com/eordano/recipes
+repo_name: eordano/recipes
+edit_uri: ""
+docs_dir: site-src
+site_dir: site
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+  links:
+    not_found: warn
+
+copyright: >-
+  Released into the public domain under
+  <a href="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0 Universal</a>.
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - search.share
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+
+extra_css:
+  - assets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/eordano/recipes
+  generator: false
+
+nav:
+  - Home: index.md
+  - Modules:
+      - Overview: modules/index.md
+      - "acme-dns01-wildcard": modules/acme-dns01-wildcard.md
+      - "bitcoind-in-nspawn-container": modules/bitcoind-in-nspawn-container.md
+      - "blackbox-endpoint-probes": modules/blackbox-endpoint-probes.md
+      - "claude-code-session-mux": modules/claude-code-session-mux.md
+      - "dns-connectivity-probe": modules/dns-connectivity-probe.md
+      - "docker-podman-cdi-rootless": modules/docker-podman-cdi-rootless.md
+      - "docker-registry-cache": modules/docker-registry-cache.md
+      - "egress-filter": modules/egress-filter.md
+      - "encrypted-dns-cache": modules/encrypted-dns-cache.md
+      - "etcd-cluster-over-tailnet": modules/etcd-cluster-over-tailnet.md
+      - "fail2ban-ipset-geoip-cloudflare": modules/fail2ban-ipset-geoip-cloudflare.md
+      - "firecrawl-oci-service": modules/firecrawl-oci-service.md
+      - "firewall-by-country": modules/firewall-by-country.md
+      - "forgejo-bidirectional-safe-sync": modules/forgejo-bidirectional-safe-sync.md
+      - "forgejo-declarative-admin-user": modules/forgejo-declarative-admin-user.md
+      - "forgejo-git-server": modules/forgejo-git-server.md
+      - "garage-declarative-init": modules/garage-declarative-init.md
+      - "geoip-database-provider": modules/geoip-database-provider.md
+      - "goaccess-live-nginx-dashboard": modules/goaccess-live-nginx-dashboard.md
+      - "gpg-yubikey-agent-forwarding": modules/gpg-yubikey-agent-forwarding.md
+      - "grafana-matrix-alert-relay": modules/grafana-matrix-alert-relay.md
+      - "harmonia-cache-with-upstream-fallback": modules/harmonia-cache-with-upstream-fallback.md
+      - "headscale IP reservations": modules/headscale-ip-reservations.md
+      - "home-manager-alias-namespace": modules/home-manager-alias-namespace.md
+      - "hydra-ci-server": modules/hydra-ci-server.md
+      - "installer-iso-secrets-partition": modules/installer-iso-secrets-partition.md
+      - "jaeger-oci-tracing": modules/jaeger-oci-tracing.md
+      - "jellyfin-vaapi-container": modules/jellyfin-vaapi-container.md
+      - "jupyterlab-cuda-sandboxed": modules/jupyterlab-cuda-sandboxed.md
+      - "keycloak-declarative-realms": modules/keycloak-declarative-realms.md
+      - "local-built-docker-service-with-nix-pinned-config-merge": modules/local-built-docker-service-with-nix-pinned-config-merge.md
+      - "mesh-overlay-address-identity": modules/mesh-overlay-address-identity.md
+      - "microvm-ram-snapshot-clones": modules/microvm-ram-snapshot-clones.md
+      - "netflow-capture": modules/netflow-capture.md
+      - "network-isolated-editor": modules/network-isolated-editor.md
+      - "nginx-opinionated-defaults": modules/nginx-opinionated-defaults.md
+      - "nix-binary-cache-proxy": modules/nix-binary-cache-proxy.md
+      - "nix-github-token": modules/nix-github-token.md
+      - "nix-remote-builders": modules/nix-remote-builders.md
+      - "nixos-hardening-tiers": modules/nixos-hardening-tiers.md
+      - "nixos-performance-tiers": modules/nixos-performance-tiers.md
+      - "nut-ups-prometheus": modules/nut-ups-prometheus.md
+      - "nvidia-docker-gpu": modules/nvidia-docker-gpu.md
+      - "nvidia-driver-kernel-compat": modules/nvidia-driver-kernel-compat.md
+      - "opensnitch-store-path-rules": modules/opensnitch-store-path-rules.md
+      - "openwebui-litellm-multideploy": modules/openwebui-litellm-multideploy.md
+      - "package-bundle-options": modules/package-bundle-options.md
+      - "paperless-ngx behind gVisor + podman": modules/paperless-ngx-gvisor-podman.md
+      - "patroni-ha-cluster": modules/patroni-ha-cluster.md
+      - "patroni-leader-proxy": modules/patroni-leader-proxy.md
+      - "per-uid-egress-lockdown": modules/per-uid-egress-lockdown.md
+      - "pgadmin-container-host-socket": modules/pgadmin-container-host-socket.md
+      - "postgresql-external-role-reconciler": modules/postgresql-external-role-reconciler.md
+      - "postgresql-major-upgrade": modules/postgresql-major-upgrade.md
+      - "postgresql-typed-hba": modules/postgresql-typed-hba.md
+      - "private-nix-cache-substituter": modules/private-nix-cache-substituter.md
+      - "push-observability-receiver": modules/push-observability-receiver.md
+      - "pypi-cache-proxy": modules/pypi-cache-proxy.md
+      - "remote-luks-unlock": modules/remote-luks-unlock.md
+      - "samba-shared-folder": modules/samba-shared-folder.md
+      - "self-hosted-firefox-sync": modules/self-hosted-firefox-sync.md
+      - "Gate systemd consumers on actual service readiness": modules/service-readiness-gate.md
+      - "signed-binary-cache": modules/signed-binary-cache.md
+      - "spool-dir-credential-broker": modules/spool-dir-credential-broker.md
+      - "ssh-write-only-drop-box": modules/ssh-write-only-drop-box.md
+      - "syncthing-tailnet-declarative": modules/syncthing-tailnet-declarative.md
+      - "synology-cert-deploy": modules/synology-cert-deploy.md
+      - "systemd-boot-mirrored-esp": modules/systemd-boot-mirrored-esp.md
+      - "tailscale-derp-server": modules/tailscale-derp-server.md
+      - "tailscale-exit-bypass": modules/tailscale-exit-bypass.md
+      - "tailscale-lan-router": modules/tailscale-lan-router.md
+      - "tailscale-multi-headscale": modules/tailscale-multi-headscale.md
+      - "tmux-ssh-agent-stable-sock": modules/tmux-ssh-agent-stable-sock.md
+      - "tmux-ssh-agent-survival": modules/tmux-ssh-agent-survival.md
+      - "vaultwarden-gvisor-sandbox": modules/vaultwarden-gvisor-sandbox.md
+      - "virtualisation-backends": modules/virtualisation-backends.md
+      - "wireguard-per-uid-exits": modules/wireguard-per-uid-exits.md
+      - "zfs-impermanence-rollback": modules/zfs-impermanence-rollback.md
+      - "zfs-native-encryption-keys": modules/zfs-native-encryption-keys.md
+  - Behaviors:
+      - Overview: behaviors/index.md
+      - "archive-organize-sync": behaviors/archive-organize-sync.md
+      - "boot-beacon": behaviors/boot-beacon.md
+      - "docker-registry-cache-proxy": behaviors/docker-registry-cache-proxy.md
+      - "pip-mirror-client": behaviors/pip-mirror-client.md
+      - "rclone-synced-folders": behaviors/rclone-synced-folders.md
+      - "vector-log-metrics-forward": behaviors/vector-log-metrics-forward.md
+  - Overlays:
+      - Overview: overlays/index.md
+      - "aarch64-native-webassets-overlay": overlays/aarch64-native-webassets-overlay.md
+      - "caddy-override-keep-withplugins": overlays/caddy-override-keep-withplugins.md
+      - "cuda-setup-hook-nvcc-fix": overlays/cuda-setup-hook-nvcc-fix.md
+      - "darwin-pyo3-dynamic-lookup": overlays/darwin-pyo3-dynamic-lookup.md
+      - "deno-compile-reproducible": overlays/deno-compile-reproducible.md
+      - "electron-bin-override": overlays/electron-bin-override.md
+      - "fish-manpage-completions-fix": overlays/fish-manpage-completions-fix.md
+      - "geoip-country-lists": overlays/geoip-country-lists.md
+      - "go-minor-pin-overlay": overlays/go-minor-pin-overlay.md
+      - "go-vendor-patch-prefix-rewrite": overlays/go-vendor-patch-prefix-rewrite.md
+      - "headplane-acl-preview-overlay": overlays/headplane-acl-preview-overlay.md
+      - "ip-cidr-set-exclude": overlays/ip-cidr-set-exclude.md
+      - "jitsi-meet-keycloak-oidc-overlay": overlays/jitsi-meet-keycloak-oidc-overlay.md
+      - "keycloak-keywind-theme-overlay": overlays/keycloak-keywind-theme-overlay.md
+      - "lnd-recovery-tools-overlay": overlays/lnd-recovery-tools-overlay.md
+      - "Fix mautrix-telegram Provisioning API Breakage on aiohttp 3.9+": overlays/mautrix-telegram-aiohttp-middleware-fix.md
+      - "mlx-metal-gpu-overlay": overlays/mlx-metal-gpu-overlay.md
+      - "nix-python-pythonpath-sitecustomize-shim": overlays/nix-python-pythonpath-sitecustomize-shim.md
+      - "Rebuild a Package Against a Vendored Fork (Protoc + eBPF Traps)": overlays/nixpkgs-fork-overlay-protoc-and-ebpf.md
+      - "nixpkgs-package-from-flake-fork": overlays/nixpkgs-package-from-flake-fork.md
+      - "python-packages-extensions-overlay": overlays/python-packages-extensions-overlay.md
+      - "qtwebengine-linker-shebang-fix": overlays/qtwebengine-linker-shebang-fix.md
+      - "Route Redlib Traffic Through a Rotating SOCKS5 Proxy Pool": overlays/redlib-adaptive-socks-proxy.md
+      - "skip-flaky-tests-overlay": overlays/skip-flaky-tests-overlay.md
+      - "stub-abandoned-package-overlay": overlays/stub-abandoned-package-overlay.md
+      - "unstable-cherry-pick-overlay": overlays/unstable-cherry-pick-overlay.md
+      - "xorg-silence-aliases": overlays/xorg-silence-aliases.md
+  - Packages:
+      - Overview: packages/index.md
+      - "agenix-encrypt-to-master": packages/agenix-encrypt-to-master.md
+      - "agenix-generated-recipients": packages/agenix-generated-recipients.md
+      - "agenix-rekey-yubikey-pin-prime": packages/agenix-rekey-yubikey-pin-prime.md
+      - "Prime the YubiKey PIN Cache Before Running agenix-rekey": packages/agenix-rekey-yubikey-pin-priming.md
+      - "agenix-rules-autogen": packages/agenix-rules-autogen.md
+      - "agenix-yubikey-pin-prime": packages/agenix-yubikey-pin-prime.md
+      - "bbolt-cli-package": packages/bbolt-cli-package.md
+      - "geoip-country-lists-package": packages/geoip-country-lists-package.md
+      - "js-workspace-package": packages/js-workspace-package.md
+      - "kokoro-onnx-nix-package": packages/kokoro-onnx-nix-package.md
+      - "mlx-lm-server": packages/mlx-lm-server.md
+      - "Package mlx-vlm on Nix Without the Torch/OpenCV Chain": packages/mlx-vlm-nix-package.md
+      - "mlx-vlm-server": packages/mlx-vlm-server.md
+      - "package-dspy": packages/package-dspy.md
+      - "python-package-gepa": packages/python-package-gepa.md
+  - Library:
+      - Overview: lib/index.md
+      - "Per-Host agenix-rekey Configuration with YubiKey Masters and Encrypted Backup": lib/agenix-rekey-yubikey-per-host.md
+      - "agenix-secret-sibling": lib/agenix-secret-sibling.md
+      - "minimal-oci-image": lib/minimal-oci-image.md
+      - "nixos-test-topology": lib/nixos-test-topology.md
+      - "nixpkgs-instance-matrix": lib/nixpkgs-instance-matrix.md

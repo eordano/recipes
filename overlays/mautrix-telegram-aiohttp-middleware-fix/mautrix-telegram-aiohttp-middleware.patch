@@ -1,0 +1,57 @@
+Fix ProvisioningAPI.error_middleware for aiohttp >= 3.9.
+
+Old-style aiohttp "middleware factory" pattern: a callable that takes
+(app, handler) and returns the middleware coroutine. aiohttp 3.9 dropped
+that mode; middlewares are now simple `(request, handler) -> Response`
+coroutines marked with @web.middleware.
+
+Under aiohttp 3.13 the old factory is treated as a simple middleware
+whose return value (the nested `middleware_handler` function, not a
+Response) is what aiohttp hands to `finish_response`. That call does
+`resp.prepare` on a function object and blows up with:
+
+  AttributeError: 'function' object has no attribute 'prepare'
+
+This affects every request to /_matrix/provision/*, not just error
+paths — middleware runs before the handler, so the handler is never
+reached; every provisioning request 500s.
+
+--- a/mautrix_telegram/web/provisioning/__init__.py
++++ b/mautrix_telegram/web/provisioning/__init__.py
+@@ -623,22 +623,21 @@
+         )
+
+     @staticmethod
++    @web.middleware
+     async def error_middleware(
+-        _, handler: Callable[[web.Request], Awaitable[web.Response]]
+-    ) -> Callable[[web.Request], Awaitable[web.Response]]:
+-        async def middleware_handler(request: web.Request) -> web.Response:
+-            try:
+-                return await handler(request)
+-            except web.HTTPException as ex:
+-                return web.json_response(
+-                    {
+-                        "error": f"Unhandled HTTP {ex.status}",
+-                        "errcode": f"unhandled_http_{ex.status}",
+-                    },
+-                    status=ex.status,
+-                )
+-
+-        return middleware_handler
++        request: web.Request,
++        handler: Callable[[web.Request], Awaitable[web.Response]],
++    ) -> web.Response:
++        try:
++            return await handler(request)
++        except web.HTTPException as ex:
++            return web.json_response(
++                {
++                    "error": f"Unhandled HTTP {ex.status}",
++                    "errcode": f"unhandled_http_{ex.status}",
++                },
++                status=ex.status,
++            )
+
+     @staticmethod
+     def get_error_response(status=200, errcode="", error="") -> web.Response:

@@ -1,50 +1,12 @@
 {
   "nodes": {
-    "flake-utils": {
-      "inputs": {
-        "systems": "systems"
-      },
-      "locked": {
-        "lastModified": 1731533236,
-        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "numtide",
-        "repo": "flake-utils",
-        "type": "github"
-      }
-    },
-    "nix-hug": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1775861071,
-        "narHash": "sha256-8sAGVoMQJI2Twxf/qAAwyAPMRXOzNE75P6oylYeldlo=",
-        "owner": "longregen",
-        "repo": "nix-hug",
-        "rev": "4344f4879fbf000eeba35c6347b1a3f3dcefa78b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "longregen",
-        "repo": "nix-hug",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1779560665,
-        "narHash": "sha256-tpyBcxPpcQb8ukyNF7DoCwfSY3VPsxHoYwj00Cayv5o=",
+        "lastModified": 1784497964,
+        "narHash": "sha256-vlHUuqAcbcH2RKmHbPiuQzbv1pnzzavXnI62RD0bqCU=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+        "rev": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
         "type": "github"
       },
       "original": {
@@ -56,48 +18,7 @@
     },
     "root": {
       "inputs": {
-        "flake-utils": "flake-utils",
-        "nix-hug": "nix-hug",
-        "nixpkgs": "nixpkgs",
-        "speaches": "speaches"
-      }
-    },
-    "speaches": {
-      "inputs": {
-        "nix-hug": [
-          "nix-hug"
-        ],
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1777939200,
-        "narHash": "sha256-VjddxCotcWqPUY3FgUv+yC43tJOtO/BCJboF2k8q4Aw=",
-        "owner": "longregen",
-        "repo": "speaches",
-        "rev": "65de3b9b665fa2eb08a84198bffac86d47a141eb",
-        "type": "github"
-      },
-      "original": {
-        "owner": "longregen",
-        "repo": "speaches",
-        "type": "github"
-      }
-    },
-    "systems": {
-      "locked": {
-        "lastModified": 1681028828,
-        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
-        "owner": "nix-systems",
-        "repo": "default",
-        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nix-systems",
-        "repo": "default",
-        "type": "github"
+        "nixpkgs": "nixpkgs"
       }
     }
   },

@@ -1,0 +1,8 @@
+# Docs-site build deps (see tools/gen_site.py + mkdocs.yml)
+# Pulls in mkdocs, pymdown-extensions, and the emoji extension used in mkdocs.yml.
+#
+# mkdocs-material is pinned to avoid silent breakage when MkDocs 2.0 ships:
+# the 2.0 release will rewrite theming and drop all current plugins with no
+# migration path. Float on >=9.0 and a routine pip upgrade would destroy the
+# site without warning.
+mkdocs-material==9.7.6
