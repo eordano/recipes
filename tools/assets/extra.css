@@ -1,0 +1,93 @@
+/* --- Nix Recipes: hero + card polish over Material --- */
+
+:root {
+  --md-primary-fg-color:        #4c5fd5;
+  --md-primary-fg-color--light: #6b7ce6;
+  --md-primary-fg-color--dark:  #37489f;
+  --md-accent-fg-color:         #5865f2;
+}
+
+/* Hero band on the home page */
+.hero {
+  text-align: center;
+  padding: 3.2rem 1rem 1.6rem;
+  margin: -1rem -0.8rem 1.5rem;
+  background:
+    radial-gradient(1200px 400px at 50% -10%, rgba(88, 101, 242, 0.18), transparent 70%),
+    linear-gradient(180deg, rgba(88, 101, 242, 0.06), transparent);
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+}
+.hero h1 {
+  font-weight: 800;
+  font-size: 2.9rem;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.2rem;
+  background: linear-gradient(92deg, var(--md-primary-fg-color), var(--md-accent-fg-color));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.hero h3 {
+  font-weight: 500;
+  color: var(--md-default-fg-color--light);
+  max-width: 42rem;
+  margin: 0.4rem auto 0.9rem;
+}
+.hero p {
+  max-width: 42rem;
+  margin: 0.6rem auto;
+  color: var(--md-default-fg-color--light);
+}
+.hero .md-button {
+  margin: 0.9rem 0.35rem 0;
+}
+/* the toc permalink pilcrow looks wrong on the hero title */
+.hero .headerlink {
+  display: none;
+}
+
+/* Card grid: lift + accent border on hover */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  border-radius: 0.7rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 6px 24px rgba(88, 101, 242, 0.14);
+  transform: translateY(-2px);
+}
+.md-typeset .grid.cards > ul > li > hr {
+  margin: 0.6rem 0;
+}
+
+/* Small pills / chips */
+.count-pill {
+  display: inline-block;
+  padding: 0.12rem 0.6rem;
+  border-radius: 1rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--md-primary-fg-color);
+  background: rgba(88, 101, 242, 0.12);
+  margin-bottom: 0.8rem;
+}
+.recipe-cat code {
+  background: rgba(88, 101, 242, 0.12);
+  color: var(--md-primary-fg-color);
+  font-weight: 600;
+}
+
+/* Tighten code blocks inside the Source <details> */
+.md-typeset details.note > summary {
+  font-weight: 600;
+}
+
+/* Home category cards: bigger icon */
+.md-typeset .grid.cards .twemoji.lg svg,
+.md-typeset .grid.cards .lg svg {
+  height: 1.6rem;
+  width: 1.6rem;
+}
