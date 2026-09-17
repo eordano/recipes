@@ -1,24 +1,3 @@
-# Self-host Firecrawl on NixOS from OCI images.
-#
-# Firecrawl (https://github.com/firecrawl/firecrawl) scrapes/crawls websites
-# into clean Markdown. Upstream ships the app as prebuilt OCI images. This
-# module wires the api + worker + a headless-Chromium (playwright) container
-# together with a dedicated Redis and, optionally, an existing Postgres for the
-# newer "NuQ" job queue.
-#
-# Two ways to supply the images:
-#   1. Registry pull  -- set `images.api` / `images.playwright` to references a
-#      local Docker/Podman can pull, and leave the *ImageFile options null.
-#   2. Offline tarball -- set `images.apiImageFile` / `images.playwrightImageFile`
-#      to `docker save`-style tarballs (or `pkgs.dockerTools.buildImage`
-#      outputs). The oci-containers backend then `docker load`s them at start,
-#      so deploys never touch a registry and stay reproducible. When using a
-#      tarball, `images.api` / `images.playwright` must still be set to the
-#      exact image tag *inside* the tarball.
-#
-# Enable `initSchema` to install the NuQ Postgres queue schema on the same host.
-# See README.md for the reasoning behind the ordering traps.
-
 {
   config,
   lib,
@@ -239,15 +218,10 @@ in
       "d ${cfg.dataDir}/data 0700 ${cfg.user} ${cfg.group} -"
     ];
 
-    # Pin the public name to loopback so the API resolves its own name for
-    # self-referential URLs (e.g. webhook callbacks) and loops back through nginx.
     networking.hosts = mkIf (cfg.domain != null) {
       "127.0.0.1" = [ cfg.domain ];
     };
 
-    # Listener limited to loopback + bridge gateway (cfg.redisBind), no wider.
-    # The 2 GB cap + allkeys-lru lets the queue/rate-limit store shed oldest
-    # keys under pressure instead of erroring.
     services.redis.servers."firecrawl" = {
       enable = true;
       bind = cfg.redisBind;
@@ -280,8 +254,6 @@ in
             PORT = toString playwrightPort;
             BLOCK_MEDIA = "true";
           };
-          # Published on loopback only; inter-container traffic uses the OCI
-          # network DNS name (playwright-service), not this host-published port.
           ports = [ "${cfg.listenAddress}:${toString playwrightPort}:${toString playwrightPort}" ];
         };
 
@@ -309,8 +281,6 @@ in
           ];
         };
 
-        # Same image as api; FLY_PROCESS_GROUP=worker is what makes the upstream
-        # image branch into worker behaviour.
         firecrawl-worker = {
           image = cfg.images.api;
           imageFile = cfg.images.apiImageFile;
@@ -337,9 +307,6 @@ in
       };
     };
 
-    # Opt-in only. By default the API is reachable via the nginx vhost (or
-    # loopback), never opened to the network, because an unauthenticated
-    # Firecrawl instance is an arbitrary-URL fetcher (SSRF).
     networking.firewall.allowedTCPPorts = mkIf cfg.openFirewall [ apiPort ];
 
     systemd.services =
@@ -349,9 +316,6 @@ in
         workerUnit = "${backend}-firecrawl-worker.service";
       in
       mkMerge [
-        # The docker bridge (and its 172.17.0.1 gateway) only exists once the
-        # daemon is up; without this ordering Redis skips the "-" bind address
-        # and containers cannot reach it until a Redis restart.
         (mkIf (backend == "docker") {
           redis-firecrawl = {
             after = [ "docker.service" ];
@@ -359,12 +323,6 @@ in
           };
         })
         (mkIf cfg.initSchema {
-          # Ordering trap: order on postgresql.TARGET, not postgresql.service.
-          # The target gates on postgresql-setup.service, which runs
-          # ensureDatabases; plain postgresql.service goes active *before* the
-          # database exists and would race this psql run. The api/worker units
-          # then require+order-after this one-shot so they never start on an
-          # empty schema. The SQL is idempotent, so this re-runs safely on boot.
           firecrawl-nuq-init = {
             description = "Install Firecrawl NuQ schema into ${cfg.databaseName}";
             wantedBy = [ "multi-user.target" ];

@@ -62,7 +62,6 @@ building. Override them off:
 ```nix
 package = pkgs.qemu_full.override {
   cephSupport = false;
-  glusterfsSupport = false;
 };
 ```
 

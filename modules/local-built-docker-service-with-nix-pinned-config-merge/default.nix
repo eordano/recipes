@@ -1,12 +1,3 @@
-# local-built-docker-service-with-nix-pinned-config-merge
-#
-# Run a self-hosted app from a Docker image built ON the host (no registry)
-# and keep the security-relevant slice of its runtime JSON config reproducible
-# in Nix by jq-merging it into the operator's hand-edited config on every start.
-#
-# See README.md for the why and the traps. This module is generic: point it at
-# a source tree containing a Dockerfile, give the image a tag, and declare the
-# pinned config surface. Everything private has been parameterized as options.
 {
   config,
   lib,
@@ -18,15 +9,8 @@ with lib;
 let
   cfg = config.services.localDockerApp;
 
-  # The pinned surface, rendered to a JSON file in the store. Only these keys
-  # are authoritative from Nix; the merge below leaves everything else in the
-  # operator's runtime config untouched.
   pinnedConfigFile = pkgs.writeText "${cfg.name}-pinned.json" (builtins.toJSON cfg.pinnedConfig);
 
-  # Merges the pinned surface into the runtime config file on every start.
-  # Split ownership: the operator owns the file (auth tokens, model choices,
-  # agents, ...); Nix owns only the keys in `pinnedConfig`, re-applied each start
-  # so they can never drift out of version control.
   mergeScript = pkgs.writeShellScript "${cfg.name}-merge-config" ''
     set -eu
     f=${cfg.stateDir}/${cfg.configFileName}
@@ -231,8 +215,6 @@ in
       "d ${cfg.workspaceDir}   0700 ${toString cfg.runUid} ${toString cfg.runGid} -"
     ];
 
-    # One-shot builder: builds the image from the on-host source context.
-    # TRAP: skips when imageTag already exists -- bump the tag to rebuild.
     systemd.services."${cfg.name}-build" = {
       description = "${cfg.name} -- build local docker image from ${cfg.sourceDir}";
       after = [
@@ -284,9 +266,7 @@ in
         RestartSec = 10;
         TimeoutStartSec = "5min";
         ExecStartPre = [
-          # leading '-' so a missing container is not an error
           "-${pkgs.docker}/bin/docker rm -f ${cfg.containerName}"
-          # re-apply the Nix-pinned config surface before every start
           "${mergeScript}"
         ];
         ExecStart = dockerRun;

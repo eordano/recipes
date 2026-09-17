@@ -64,7 +64,7 @@ let
     // {
       ${mountSlash} = {
         alias = "${app.root}/";
-        index = app.index;
+        inherit (app) index;
         extraConfig = ''
           brotli_static on;
           disable_symlinks off;

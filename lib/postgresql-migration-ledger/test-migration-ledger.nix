@@ -53,7 +53,7 @@ in
 pkgs.nixosTest {
   name = "postgresql-migration-ledger";
 
-  nodes.machine = { ... }: {
+  nodes.machine = _: {
     services.postgresql = {
       enable = true;
       ensureDatabases = [ "app" ];

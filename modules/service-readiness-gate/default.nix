@@ -178,8 +178,6 @@ in
   };
 
   config = mkIf (cfg != { }) {
-    # mkMerge, not //: several gates may guard the same consumer, and their
-    # Requires=/After= lists have to accumulate rather than overwrite.
     systemd.services = lib.mkMerge (
       [
         (mapAttrs' (

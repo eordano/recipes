@@ -17,7 +17,6 @@ import textwrap
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "site-src"
 
-# category dir -> (nav label, tab icon, one-line blurb for the home card)
 CATEGORIES = [
     ("modules", "Modules", "material/puzzle",
      "Importable NixOS modules -- services, hardening, setup building blocks."),
@@ -41,20 +40,16 @@ LOCAL_NIX_LINK = re.compile(
     r"(?P<fragment>#[^)]*)?(?P<close>\))"
 )
 
-
 def slug_dirs(cat: str) -> list[str]:
     d = ROOT / cat
     return sorted(p.name for p in d.iterdir() if p.is_dir() and (p / "README.md").exists())
 
-
 def read(p: pathlib.Path) -> str:
     return p.read_text(encoding="utf-8")
-
 
 def title_of(readme: str, fallback: str) -> str:
     m = re.search(r"^#\s+(.+)$", readme, re.MULTILINE)
     return m.group(1).strip() if m else fallback
-
 
 def summary_of(readme: str) -> str:
     """First real paragraph after the H1, flattened to one line."""
@@ -71,24 +66,15 @@ def summary_of(readme: str) -> str:
     para = re.sub(r"\*(.+?)\*", r"\1", para)
     para = re.sub(r"`(.+?)`", r"\1", para)
     if len(para) > 180:
-        # Prefer the *last* sentence boundary at or before the limit, so a short
-        # opening sentence ("It works. <the actual explanation>") doesn't shrink
-        # the blurb to three words. Only take it if enough text survives to be
-        # useful; otherwise fall back to a word boundary plus an ellipsis.
         ends = [m.end() for m in re.finditer(r"[.?!](?=\s|$)", para[:180])]
         if ends and ends[-1] >= 90:
-            # Ends on a complete sentence -- no ellipsis, it already reads whole.
             para = para[: ends[-1]].rstrip()
         else:
             cut = para[:180].rsplit(" ", 1)[0]
-            # Drop trailing punctuation that reads as incomplete before the "...".
             para = cut.rstrip(":,;---").rstrip() + "..."
     else:
-        # Even short paragraphs may end with a colon / comma that precedes a
-        # list in the original markdown -- strip those so the blurb reads cleanly.
         para = para.rstrip(":,;---").rstrip()
     return para or "A reusable Nix recipe."
-
 
 def rewrite_links_for_site(markdown: str, cat: str, name: str) -> str:
     """Translate repository-relative links for generated MkDocs pages.
@@ -116,7 +102,6 @@ def rewrite_links_for_site(markdown: str, cat: str, name: str) -> str:
     markdown = RECIPE_LINK.sub(recipe_target, markdown)
     return LOCAL_NIX_LINK.sub(nix_target, markdown)
 
-
 def recipe_page(cat: str, name: str) -> tuple[str, str, str]:
     """Return (title, summary, page_markdown) for one recipe."""
     d = ROOT / cat / name
@@ -125,14 +110,10 @@ def recipe_page(cat: str, name: str) -> tuple[str, str, str]:
     title = title_of(readme, name)
     summary = summary_of(readme)
 
-    # A small metadata line under the H1: category chip + source jump.
     chip = f"`{CAT_LABEL[cat]}`"
     header, _, rest = readme.partition("\n")
     body = header + f"\n\n<span class=\"recipe-cat\">{chip}</span>\n" + rest
 
-    # Collapsible source, inside a `??? note` admonition. Everything in the
-    # admonition body -- the fence markers and the code -- must sit at the same
-    # 4-space indent, or superfences won't close the block correctly.
     src = (
         "\n\n## Source\n\n"
         f'??? note "`{cat}/{name}/default.nix`"\n\n'
@@ -143,29 +124,46 @@ def recipe_page(cat: str, name: str) -> tuple[str, str, str]:
 
     return title, summary, body.rstrip("\n") + "\n" + src
 
-
 def card(href: str, title: str, summary: str, icon: str | None = None) -> str:
     ic = f":{icon.replace('/', '-')}:{{ .lg .middle }} " if icon else ""
     return (f"-   {ic}__[{title}]({href})__\n\n"
             f"    ---\n\n"
             f"    {summary}\n")
 
-
 def write(path: pathlib.Path, text: str) -> None:
+    data = text.encode("utf-8")
+    if path.is_file() and path.read_bytes() == data:
+        return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
+    path.write_bytes(data)
 
 def main() -> None:
-    if SRC.exists():
-        shutil.rmtree(SRC)
     SRC.mkdir(parents=True, exist_ok=True)
-    # static assets live under tools/assets and are copied in fresh each run
-    shutil.copytree(ROOT / "tools" / "assets", SRC / "assets")
+    expected = {SRC / "index.md"}
+    assets = ROOT / "tools" / "assets"
+    asset_output = SRC / "assets"
+    # Clear stale assets and file/directory conflicts before overlay copying.
+    for target in sorted(asset_output.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        source = assets / target.relative_to(asset_output)
+        if target.is_symlink():
+            target.unlink()
+        elif target.is_dir() and not source.is_dir():
+            shutil.rmtree(target)
+        elif target.is_file() and not source.is_file():
+            target.unlink()
+
+    def copy_asset(source, target):
+        source, target = pathlib.Path(source), pathlib.Path(target)
+        expected.add(target)
+        if not target.is_file() or target.read_bytes() != source.read_bytes():
+            shutil.copy2(source, target)
+        return str(target)
+
+    shutil.copytree(assets, asset_output, dirs_exist_ok=True, copy_function=copy_asset)
 
     nav = ["  - Home: index.md"]
     counts = {}
-    home_summaries = {}  # cat -> list of (title, href, summary) for later
+    home_summaries = {}
 
     for cat, label, icon, blurb in CATEGORIES:
         names = slug_dirs(cat)
@@ -176,15 +174,12 @@ def main() -> None:
         entries = []
         for name in names:
             title, summary, page = recipe_page(cat, name)
+            expected.add(SRC / cat / f"{name}.md")
             write(SRC / cat / f"{name}.md", page)
             q = title.replace('"', '\\"')
             nav.append(f'      - "{q}": {cat}/{name}.md')
             cards.append(card(f"{name}.md", title, summary))
             entries.append((title, name, summary))
-        # category overview page. NOTE: the card grid is inserted via a
-        # single-line placeholder AFTER dedent -- interpolating a multi-line
-        # (column-0) block directly would defeat textwrap.dedent and leave the
-        # whole page indented, which Markdown renders as one big code block.
         grid = "<div class=\"grid cards\" markdown>\n\n" + "\n".join(cards) + "\n</div>\n"
         page = textwrap.dedent(f"""\
             # {label}
@@ -195,10 +190,10 @@ def main() -> None:
 
             __GRID__
             """).replace("__GRID__", grid)
+        expected.add(SRC / cat / "index.md")
         write(SRC / cat / "index.md", page)
         home_summaries[cat] = entries
 
-    # ---- home page ----
     total = sum(counts.values())
     cat_cards = []
     for cat, label, icon, blurb in CATEGORIES:
@@ -254,7 +249,6 @@ def main() -> None:
         """).replace("__CATGRID__", cat_grid)
     write(SRC / "index.md", home)
 
-    # ---- mkdocs.yml ----
     nav_yaml = "\n".join(nav)
     mkdocs = textwrap.dedent(f"""\
         site_name: Nix Recipes
@@ -352,15 +346,18 @@ def main() -> None:
 
         nav:
         """)
-    # nav_yaml is multi-line with its own indentation; appending after dedent
-    # avoids textwrap.dedent collapsing the template's common prefix to zero.
     write(ROOT / "mkdocs.yml", mkdocs + nav_yaml + "\n")
+
+    for path in sorted(SRC.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_file() and path not in expected:
+            path.unlink()
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
 
     print(f"Generated site-src/ for {total} recipes across {len(CATEGORIES)} categories:")
     for cat, label, *_ in CATEGORIES:
         print(f"  {label:10s} {counts[cat]:3d}")
     print(f"mkdocs.yml written with {len(nav)} nav lines.")
-
 
 if __name__ == "__main__":
     main()

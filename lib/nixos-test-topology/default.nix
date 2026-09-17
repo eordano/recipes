@@ -1,36 +1,3 @@
-# nixos-test-topology
-#
-# A topology builder + fixture library for `pkgs.testers.runNixOSTest`.
-#
-# `mkTopology` takes a declarative description of subnets and hosts and returns
-# per-node NixOS modules that give every machine EXACTLY the addresses you
-# asked for -- no phantom addresses from the test framework's own automatic
-# assignment. It also returns the addresses back to you as plain strings so the
-# testScript can reference them without hardcoding anything twice.
-#
-# The fixtures are the other half: an option/secret stub that materialises
-# secrets at the SAME path convention the real provider uses, a source-address
-# echo server, and a netfilter FORWARD-hook packet counter -- the instrument
-# that turns "the request was blocked" into "the request reached the forward
-# hook AND was blocked".
-#
-#   topo = (import ./lib/nixos-test-topology).mkTopology {
-#     subnets = { guest.vlan = 1; uplink.vlan = 2; };
-#     hosts = {
-#       browser = { addresses.guest = 50; via = "gateway"; };
-#       gateway = { addresses = { guest = 1; uplink = 1; }; forward = true; };
-#       origin  = { addresses.uplink = 80; via = "gateway"; };
-#     };
-#   };
-#
-#   nodes.browser = { ... }: { imports = [ topo.nodes.browser ]; };
-#   # -> browser has 10.1.0.50/24 on eth1 and nothing else.
-#   # -> topo.ip.origin.uplink == "10.2.0.80"
-#
-# See README.md for the four traps this exists to defuse, with upstream
-# file:line citations. `examples.filteringRouter` at the bottom is a complete,
-# runnable three-node test that exercises every one of them.
-
 let
   inherit (builtins)
     attrNames
@@ -93,17 +60,10 @@ let
           {
             name = sname;
             inherit vlan;
-            # Deliberately NOT 192.168.<vlan>.x: that is the framework's own
-            # auto-assignment range (nixos/lib/testing/network.nix:41). Staying
-            # off it means a stray auto-assigned address shows up as an obvious
-            # 192.168.* stranger instead of silently duplicating one of yours.
             prefix = s.prefix or "10.${toString vlan}.0";
             prefix6 = s.prefix6 or null;
             prefixLength = s.prefixLength or defaultPrefixLength;
             prefixLength6 = s.prefixLength6 or 64;
-            # eth<vlan>, not eth<ordinal>: the interface name then encodes the
-            # subnet and is the same on every host, so testScripts and firewall
-            # rules can name it without knowing a host's interface ordering.
             interface = s.interface or "eth${toString vlan}";
           };
 
@@ -205,11 +165,6 @@ let
 
       check = v: if errors == [ ] then v else throw ("mkTopology:\n  " + concatStringsSep "\n  " errors);
 
-      # Every host/subnet address gets a stable `<host>-<subnet>` name. The
-      # framework's own /etc/hosts only ever publishes each node's PRIMARY
-      # address (nixos/lib/testing/network.nix:96-99), so on a multi-homed node
-      # the bare hostname resolves to one subnet only. Use these aliases when a
-      # peer must reach a specific leg.
       extraHostsText = concatStringsSep "\n" (
         concatLists (
           map (hname: map (sname: "${addrOf hname sname} ${hname}-${sname}") (hostSubnets hname)) (
@@ -232,11 +187,6 @@ let
           ...
         }:
         {
-          # THE fix. `virtualisation.vlans = [ N ]` desugars to an interface with
-          # `assignIP = true` (nixos/modules/virtualisation/guest-networking-options.nix:50),
-          # which makes the framework hand out 192.168.<vlan>.<alphabetical rank>.
-          # Declaring the interface directly with assignIP = false leaves the
-          # addressing entirely to us.
           virtualisation.interfaces = listToAttrs (
             map (
               s:
@@ -274,13 +224,6 @@ let
               ) snames
             );
 
-            # With assignIP = false the framework's own `ipInterfaces` binding is
-            # empty, so it still DEFINES primaryIPAddress -- as "" -- and this
-            # node would vanish from every peer's /etc/hosts. mkForce is required
-            # (a plain definition is a conflict, not an override); the one
-            # upstream test that uses assignIP does exactly the same
-            # (nixos/tests/systemd-initrd-bridge.nix:27). This is the ONE place
-            # mkForce is correct here -- never on `networking.interfaces.*`.
             primaryIPAddress = lib.mkForce (addrOf hname primary);
 
             extraHosts = extraHostsText;
@@ -332,18 +275,15 @@ let
         };
     in
     check {
-      # Normalised inputs, for callers that want to introspect.
       subnets = sub;
       inherit hosts;
 
-      # topo.ip.<host>.<subnet> -> "10.1.0.50"
       ip = listToAttrs (
         map (hname: nvp hname (listToAttrs (map (s: nvp s (addrOf hname s)) (hostSubnets hname)))) (
           sortedNames hosts
         )
       );
 
-      # topo.ip6.<host>.<subnet>, only for subnets that declared a prefix6.
       ip6 = listToAttrs (
         map (
           hname:
@@ -355,25 +295,20 @@ let
         ) (sortedNames hosts)
       );
 
-      # topo.iface.<subnet> -> "eth1"; same on every host by construction.
       iface = listToAttrs (map (s: nvp s sub.${s}.interface) (sortedNames sub));
 
-      # topo.vlan.<subnet> -> 1
       vlan = listToAttrs (map (s: nvp s sub.${s}.vlan) (sortedNames sub));
 
-      # topo.cidr.<subnet> -> "10.1.0.0/24"
       cidr = listToAttrs (
         map (s: nvp s "${sub.${s}.prefix}.0/${toString sub.${s}.prefixLength}") (sortedNames sub)
       );
 
-      # topo.alias.<host>.<subnet> -> "browser-guest", resolvable on every node.
       alias = listToAttrs (
         map (hname: nvp hname (listToAttrs (map (s: nvp s "${hname}-${s}") (hostSubnets hname)))) (
           sortedNames hosts
         )
       );
 
-      # topo.nodes.<host> -> a NixOS module to `imports = [ ... ]` into that node.
       nodes = listToAttrs (map (hname: nvp hname (nodeModule hname)) (sortedNames hosts));
 
       inherit extraHostsText;
@@ -381,10 +316,6 @@ let
 
   fixtures = {
 
-    # Declare foreign option paths so a module under test can read or set an
-    # option tree whose real provider (home-manager, a private module set, ...)
-    # is not imported in the test. `paths` maps a dotted option path to the
-    # default value.
     optionStub =
       paths:
       { lib, ... }:
@@ -403,17 +334,6 @@ let
         );
       };
 
-    # A stand-in secrets provider.
-    #
-    # `runDir` MUST match the real provider's default path convention, because
-    # modules under test reference `config.<namespace>.secrets.<n>.path` and a
-    # stub that seeds somewhere else makes the test green while the real
-    # deployment reads a file that does not exist.
-    #
-    # Seeding is an ORDERING problem, not a file-creation problem. The seeder is
-    # a `Type=oneshot` + `RemainAfterExit=true` unit and every declared consumer
-    # gets an explicit `Requires=`/`After=` edge to it, so a consumer restarted
-    # mid-test still finds its secret.
     secretsStub =
       {
         namespace ? "age",
@@ -497,8 +417,6 @@ let
                 description = "Seed stub secrets for the NixOS test";
                 wantedBy = [ "multi-user.target" ];
                 before = [ "multi-user.target" ] ++ consumers;
-                # Non-root owners need the users to exist first; harmless when
-                # the unit is absent.
                 after = [ "systemd-sysusers.service" ];
                 serviceConfig = {
                   Type = "oneshot";
@@ -521,9 +439,6 @@ let
         );
       };
 
-    # HTTP server that answers with the client's source address. The measuring
-    # instrument for "did this request actually get NATed / routed", as opposed
-    # to "did the request succeed".
     httpEcho =
       {
         name ? "http-echo",
@@ -561,19 +476,6 @@ let
         };
       };
 
-    # A counting base chain on the netfilter FORWARD hook.
-    #
-    # A routing/filtering test is only meaningful if the packets actually reach
-    # the forward hook. Put the guest and the destination on the same subnet and
-    # they ARP each other directly: the request succeeds, the filter never runs,
-    # and the test is green while proving nothing. Read this counter and the
-    # illusion collapses.
-    #
-    # Implemented as its own nf_tables table at a low priority with `policy
-    # accept`, so it counts and falls through whatever firewall backend is in
-    # use. It deliberately does NOT go through `networking.firewall.extraCommands`,
-    # which nixpkgs hard-asserts must be empty under the nftables backend
-    # (nixos/modules/services/networking/firewall-nftables.nix:65).
     forwardCounter =
       {
         name ? "topo_fwd",
@@ -626,16 +528,6 @@ let
       };
   };
 
-  # A complete, runnable three-node test. Build it with:
-  #
-  #   nix build --impure --expr '
-  #     let pkgs = import <nixpkgs> {}; in
-  #     (import ./lib/nixos-test-topology).examples.filteringRouter { inherit pkgs; }'
-  #
-  # Node names are deliberately alphabetical-adversarial: "browser" < "gateway"
-  # < "origin", so the framework would rank them 1/2/3 and hand out
-  # 192.168.1.1, 192.168.1.2, 192.168.1.3. The test asserts no 192.168.* address
-  # exists anywhere, which is the regression test for that whole trap family.
   examples.filteringRouter =
     { pkgs }:
     let
@@ -728,9 +620,6 @@ let
             networking.firewall.enable = false;
             system.stateVersion = "25.05";
 
-            # A module "under test" declaring a secret the ordinary way. The stub
-            # materialises it at the declared path -- which is the real
-            # provider's default, /run/agenix/<name>.
             age.secrets.api-token = { };
 
             systemd.services.token-reader = {

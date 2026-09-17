@@ -1,23 +1,3 @@
-# Jellyfin in an isolated NixOS declarative container, with Intel VA-API
-# hardware transcoding passed through from the host.
-#
-# The container sits on a private veth pair reachable only by the host's nginx
-# proxy -- nothing else on the network can dial it directly. Hardware transcoding
-# still works because the host's DRM render nodes are bind-mounted and
-# whitelisted into the otherwise-isolated container.
-#
-# `allowExternalConnections` is the escape hatch: when the container itself needs
-# outbound internet (e.g. to download Jellyfin plugins), it drops the private
-# network entirely and nginx repoints to 127.0.0.1.
-#
-# Usage (import this module, then):
-#
-#   modules.jellyfin = {
-#     enable    = true;
-#     domain    = "jellyfin.example.com";
-#     acmeHost  = "example.com";
-#     mediaDir  = "/srv/media";
-#   };
 {
   config,
   lib,
@@ -87,6 +67,10 @@ in
         UID for the jellyfin system user. The value is arbitrary -- its only job
         is to be stable across rebuilds/hosts so the persisted `dataDir` stays
         chown-correct. Pick any free UID.
+
+        On a host where a jellyfin account already exists under a different UID,
+        set this to that UID: NixOS refuses to renumber an existing user (it
+        only warns), so a mismatch leaves the declared and actual UID diverged.
       '';
     };
 
@@ -143,8 +127,6 @@ in
       };
     };
 
-    # A matching user on the host keeps ownership of the persisted dataDir stable
-    # (the container's jellyfin user shares the same uid/gid).
     users = {
       users.jellyfin = {
         inherit (cfg) uid;
@@ -156,37 +138,28 @@ in
     };
 
     systemd.tmpfiles.rules = [
-      "d ${cfg.dataDir} 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
+      "d ${cfg.dataDir} 0700 jellyfin jellyfin - -"
     ];
 
     containers.media = {
       autoStart = true;
-      # Private veth by default -> only the host nginx can reach :8096.
-      # allowExternalConnections flips this so the container gets its own route out.
       privateNetwork = lib.mkDefault (!cfg.allowExternalConnections);
       inherit (cfg.containerNetwork) hostAddress localAddress;
       extraFlags = [ "--link-journal=host" ];
 
       config = _: {
         system.stateVersion = "24.11";
-        services.journald.extraConfig = ''
-          Storage=volatile
-          ForwardToSyslog=yes
-        '';
+        services.journald.settings.Journal = {
+          Storage = "volatile";
+          ForwardToSyslog = true;
+        };
 
         services.jellyfin = {
           enable = true;
-          # Only open :8096 on the firewall in private-veth mode, where the
-          # container has its own netns and nginx reaches it over the veth. With
-          # allowExternalConnections the container shares the host netns, so an
-          # open :8096 would expose plaintext Jellyfin on every host interface;
-          # nginx reaches it over loopback (unfirewalled) instead.
           openFirewall = !cfg.allowExternalConnections;
           dataDir = "/data";
         };
 
-        # VA-API transcoding needs the graphics stack present inside the
-        # container even though the *device nodes* come from the host.
         hardware.graphics = {
           enable = true;
           enable32Bit = true;
@@ -204,8 +177,6 @@ in
           useHostResolvConf = lib.mkForce false;
           inherit (cfg) nameservers;
           firewall = {
-            # See services.jellyfin.openFirewall above: keep :8096 off the
-            # firewall in host-networking mode so it isn't reachable on the LAN.
             allowedTCPPorts = lib.optionals (!cfg.allowExternalConnections) [ 8096 ];
           };
         };
@@ -221,8 +192,6 @@ in
           users.jellyfin = {
             inherit (cfg) uid;
             group = "jellyfin";
-            # render + video give the jellyfin user access to the passed-in DRM
-            # nodes for hardware transcoding.
             extraGroups = [
               "render"
               "video"
@@ -245,17 +214,12 @@ in
           hostPath = "${cfg.dataDir}";
           isReadOnly = false;
         };
-        # Pass the whole DRM directory through...
         "/dev/dri" = {
           hostPath = "/dev/dri";
           isReadOnly = false;
         };
       };
 
-      # ...and additionally whitelist the specific device nodes, or the
-      # container's device cgroup blocks access to them. renderD128 is the
-      # render node used for VA-API; card0 is the primary DRM card. Adjust if
-      # your host enumerates them differently (renderD129, card1, ...).
       allowedDevices = [
         {
           modifier = "rw";

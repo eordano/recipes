@@ -1,29 +1,3 @@
-# remote-luks-unlock
-#
-# A NixOS module that makes a locked LUKS root remotely unlockable over SSH
-# during the initrd boot stage. When the machine boots, it stops at the
-# passphrase prompt with no console attached; this module brings up networking
-# and an SSH server *inside the initrd* so an operator can connect and type the
-# passphrase, after which the boot continues normally.
-#
-# The subtle parts (all preserved below):
-#   * The initrd login shell runs `systemd-tty-ask-password-agent --query`
-#     (NOT `--watch`) so it answers the one pending prompt and exits.
-#   * You must connect with `ssh -t` (a PTY) or the agent has no tty and the
-#     session closes without ever prompting.
-#   * The unlock interface must be configured explicitly, or SSH binds to no
-#     address and is unreachable.
-# See README.md for the full explanation and the wrong-password lockout trap.
-#
-# Usage:
-#   imports = [ ./remote-luks-unlock ];
-#   modules.unlock-ssh = {
-#     enable = true;
-#     hostKeys = { ssh_host_ed25519_key = "/path/to/initrd_host_ed25519_key"; };
-#     authorizedKeys = [ "ssh-ed25519 AAAA... operator@example.com" ];
-#     networkInterface = "enp1s0";
-#   };
-
 {
   config,
   lib,
@@ -33,10 +7,6 @@
 let
   cfg = config.modules.unlock-ssh;
 
-  # The initrd login shell. Answering exactly one pending password request and
-  # then exiting is deliberate: `--query` handles the queued prompt and returns,
-  # so the SSH session closes on accept and the boot proceeds. `--watch` would
-  # instead block forever waiting for prompts that never arrive.
   askPassShell = pkgs.writeScript "initrd-unlock-askpass" ''
     #!/bin/sh
     exec ${config.boot.initrd.systemd.package}/bin/systemd-tty-ask-password-agent --query
@@ -149,14 +119,10 @@ in
 
       systemd = {
         enable = true;
-        # The root login shell in the initrd is the password agent itself, so an
-        # SSH connection immediately prompts for the passphrase.
         users.root.shell = lib.mkIf cfg.promptOnLogin "${askPassShell}";
         storePaths = lib.mkIf cfg.promptOnLogin [ askPassShell ];
         network = {
           enable = true;
-          # Explicit interface config is mandatory: without it the initrd comes
-          # up with no address and SSH is unreachable.
           networks."50-unlock" = {
             matchConfig.Name = cfg.networkInterface;
             networkConfig =
@@ -173,8 +139,6 @@ in
         };
       };
 
-      # Copy the private host keys into the initrd's secret store so the SSH
-      # server can present a stable identity across reboots.
       secrets = lib.mapAttrs' (
         name: value: lib.nameValuePair "/etc/secrets/initrd/${name}" (lib.mkForce value)
       ) cfg.hostKeys;

@@ -1,25 +1,3 @@
-# firewall-by-country -- geo-filter inbound traffic with ipset + iptables
-#
-# A NixOS module that builds per-country ipset hash tables from prefix lists
-# and inserts an iptables/ip6tables chain (v4 + v6) at INPUT position 1 to
-# allow- or block-list traffic by the source IP's country.
-#
-# THE LOAD-BEARING TRAP (do not remove any RETURN rule below):
-# Before the country DROP you MUST `RETURN` on ESTABLISHED/RELATED and on
-# every private / loopback / link-local range PLUS CGNAT 100.64.0.0/10
-# (RFC 6598) -- and, for v6, on your overlay/mesh ULA prefix. Otherwise an
-# allowlist silently locks out return traffic and your own management network
-# (VPN / mesh / tailnet). Matching is on SOURCE IP only, and the chain is
-# inserted at INPUT position 1 so it runs ahead of the rest of
-# networking.firewall.
-#
-# You must supply the prefix lists yourself (there is no upstream package):
-# set `geoipPackage` to a derivation laying out
-#   share/geoip-country-lists/<cc>/ipv4-aggregated.txt
-#   share/geoip-country-lists/<cc>/ipv6-aggregated.txt
-# one CIDR per line ('#' comments ignored). Sources for such lists include
-# ipdeny.com aggregated zones or a MaxMind GeoLite2 export.
-
 {
   config,
   lib,
@@ -37,11 +15,6 @@ let
 
   ipv6Enabled = config.networking.enableIPv6;
 
-  # Ranges that must always bypass the country check. The v4 defaults are the
-  # standard RFC 1918 private ranges, loopback, link-local, and the RFC 6598
-  # CGNAT block (100.64.0.0/10) -- many mesh/VPN overlays (e.g. Tailscale) hand
-  # out addresses inside CGNAT, so dropping it would lock out your own tunnel.
-  # Append your own via extraAllowedRangesV4 / extraAllowedRangesV6.
   allowRangesV4 = [
     "127.0.0.0/8"
     "10.0.0.0/8"
@@ -52,10 +25,6 @@ let
   ]
   ++ cfg.extraAllowedRangesV4;
 
-  # v6 defaults: loopback, link-local, and unique-local (fc00::/7 covers ULA).
-  # If your mesh/VPN uses a ULA prefix outside fc00::/7, or you want it listed
-  # explicitly, add it to extraAllowedRangesV6 (Tailscale's default is
-  # fd7a:115c:a1e0::/48).
   allowRangesV6 = [
     "::1/128"
     "fe80::/10"
@@ -113,30 +82,6 @@ let
     ))
   );
 
-  # nixpkgs' nftables-based firewall (firewall-nftables.nix) hard-asserts
-  # networking.firewall.extraCommands/extraStopCommands == "" -- the
-  # INPUT-position-1 jump chains below can't be driven through them on that
-  # backend. Instead this builds its own nftables table (family inet, name
-  # firewall-by-country) OUTSIDE `networking.nftables.tables`: unlike the
-  # fail2ban-ipset-geoip-cloudflare recipe, there's no accumulated runtime
-  # state to protect here (the country sets are fully rebuilt from
-  # geoipPackage on every run regardless of backend), so the nftables path
-  # just deletes the whole table if present and recreates it from scratch in
-  # one atomic `nft -f` transaction -- no delta/preservation logic needed.
-  #
-  # Each per-interface chain and the global chain become their own nftables
-  # chain (not a base chain), jumped to from one dispatcher base chain hooked
-  # at a priority earlier than nixos-fw's (`filter - 10`), in the same order
-  # the iptables path ends up with after its repeated `-I INPUT 1` inserts:
-  # per-interface chains first, the global chain last. `return` inside a
-  # jumped-to chain resumes the dispatcher at the next jump -- the nftables
-  # equivalent of iptables' "RETURN to INPUT, fall through to the next -j
-  # rule" -- so the established/related and bypass-range RETURN rules keep
-  # exactly the same "skip this scope's country check, but still let a later
-  # scope (and, if nothing terminates, nixos-fw itself) see the packet"
-  # meaning. An explicit accept/drop, by contrast, is terminal immediately
-  # (matching iptables ACCEPT/DROP), including the unconditional
-  # default-action rule at the end of each chain.
   nft = config.networking.firewall.backend == "nftables";
   nftBin = "${pkgs.nftables}/bin/nft";
   nftCountrySet = country: "country_${country}";
@@ -144,8 +89,6 @@ let
 
   nftDeleteTable = "${nftBin} delete table inet firewall-by-country 2>/dev/null || true";
 
-  # Rule body (no chain wrapper) for one scope: the global filter, or one
-  # interface's filter. Mirrors generateIptablesRules one-for-one.
   nftScopeRules =
     {
       enable,
@@ -224,10 +167,6 @@ let
     }
   '';
 
-  # Runtime population of the per-country set elements, read from
-  # geoipPackage at RUNTIME (not Nix eval time) so referencing it never
-  # forces an import-from-derivation build during evaluation -- same
-  # constraint and same technique as the iptables-path createIpsetCommands.
   nftPopulateCountrySets = countries: ''
     ${concatMapStrings (country: ''
       if [ -f "${geoipCountryLists}/share/geoip-country-lists/${toLower country}/ipv4-aggregated.txt" ]; then
@@ -326,8 +265,6 @@ let
 
       uppercaseInterfaceCountries = map toUpper countries;
 
-      # RETURN on both source and destination for each bypass range, so the
-      # country check never sees local/return traffic.
       returnRulesV4 = concatMapStrings (range: ''
         ${iptables} -A ${chainName} ${interfaceFlag} -s ${range} -j RETURN
         ${iptables} -A ${chainName} ${interfaceFlag} -d ${range} -j RETURN
@@ -514,9 +451,6 @@ in
 
     networking.firewall.extraPackages = optional (!nft) pkgs.ipset;
 
-    # iptables backend only -- see the nft/nftRuleset comment above for the
-    # nftables path (its own self-managed table, rebuilt by the
-    # firewall-by-country-nftables systemd unit below).
     networking.firewall.extraCommands = optionalString (!nft) ''
       ${optionalString (allCountries != [ ]) (createIpsetCommands allCountries)}
 

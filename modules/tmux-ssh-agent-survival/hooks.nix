@@ -1,12 +1,3 @@
-# Pure generator for the SSH-agent-survival shell hooks, shared by the
-# tmux-ssh-agent-survival home-manager module (below) AND any non-module
-# consumer that needs the same shell snippets (e.g. a tmux config helper that
-# embeds them into bash/fish init and ~/.ssh/rc directly).
-#
-# Returns { bashSshHook; fishSshHook; sshRc; } for a given stable-socket path
-# (`sock`), candidate-socket dir (`dir`), and whether ~/.ssh/rc should replicate
-# sshd's xauth handling (`installXauth`). The ordering/traps that must stay
-# intact are documented in README.md, under "Traps this encodes".
 {
   pkgs,
   lib,
@@ -15,8 +6,6 @@
   installXauth ? false,
 }:
 let
-  # A fixed store path to `timeout` rather than a bare `timeout`, so the hooks
-  # work even on hosts (e.g. macOS) where coreutils isn't on the default PATH.
   timeout = "${pkgs.coreutils}/bin/timeout";
 in
 {

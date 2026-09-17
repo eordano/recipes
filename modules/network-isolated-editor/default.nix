@@ -1,36 +1,3 @@
-# network-isolated-editor
-#
-# Wrap your $EDITOR (or any interactive program) in a no-network sandbox.
-#
-#   - Linux : bwrap --unshare-net  (a fresh net namespace with loopback only)
-#   - macOS : sandbox-exec with (deny network*)
-#
-# Two hard-won traps are baked in (see README.md):
-#
-#   1. On Linux we deliberately use bubblewrap, NOT firejail. firejail runs the
-#      editor inside a PID namespace whose monitor (PID 1) refuses to exit until
-#      *every* process in the namespace is gone. Editors spawn LSP/treesitter
-#      job children that linger past `:wq`, so firejail keeps waiting and any
-#      caller doing an $EDITOR handoff (git commit, `crontab -e`, ...) hangs
-#      forever at "Waiting for your editor to close the file...". bwrap creates
-#      no PID namespace: it waits only on the editor, and lingering jobs
-#      reparent to init.
-#
-#   2. The wrapper no-ops when IS_SANDBOX=1 is set. Agent runtimes (coding
-#      assistants and similar) export IS_SANDBOX=1 and already govern the
-#      network for everything they launch. Nesting a second sandbox inside that
-#      one breaks the $EDITOR handoff, so we just exec the editor directly.
-#
-# This is a NixOS / nix-darwin module. Import it and set:
-#
-#   programs.networkIsolatedEditor = {
-#     enable  = true;
-#     package = pkgs.neovim;   # any editor derivation
-#   };
-#
-# It installs a hiPrio wrapper named after `binName` (plus any `aliases`) into
-# environment.systemPackages, shadowing the unwrapped editor on PATH.
-
 {
   lib,
   pkgs,
@@ -43,8 +10,6 @@ let
 
   isDarwin = pkgs.stdenv.hostPlatform.isDarwin;
 
-  # Wrap a derivation so `$out/bin/<name>` also appears under each alias name,
-  # keeping the wrapped binary as the real entrypoint the alias points at.
   withAliases =
     drv:
     if cfg.aliases == [ ] then
@@ -56,11 +21,8 @@ let
         postBuild = lib.concatMapStringsSep "\n" (a: "ln -s ${cfg.binName} $out/bin/${a}") cfg.aliases;
       };
 
-  # Any shell to run before exec'ing the editor (extra env, PATH tweaks, ...).
-  # Kept generic on purpose -- put your own `export FOO=bar` lines here.
   prelude = lib.optionalString (cfg.extraPrelude != "") (cfg.extraPrelude + "\n");
 
-  # ---- Linux: bwrap --unshare-net -----------------------------------------
   mkLinuxWrapper =
     editor:
     withAliases (
@@ -92,11 +54,6 @@ let
       ''
     );
 
-  # ---- macOS: sandbox-exec (deny network*) --------------------------------
-  # sandbox-exec has no PID-namespace pitfall, but its default policy is
-  # deny-nothing, so we allow-everything then subtract network + writes.
-  # `writePaths` is an allowlist of subpaths the editor may still write to
-  # (its own state/config/cache dirs, tmp, the working tree).
   darwinWriteAllow = lib.concatMapStringsSep "\n          " (p: ''(subpath "${p}")'') cfg.writePaths;
 
   mkDarwinWrapper =
@@ -162,7 +119,6 @@ let
       ''
     );
 
-  # No isolation: just the editor, plus prelude and aliases.
   mkPlainWrapper =
     editor:
     withAliases (

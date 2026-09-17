@@ -1,60 +1,3 @@
-# NixOS VM test for the opensnitch-store-path-rules module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from a flake:
-#
-#   pkgs.callPackage ./modules/opensnitch-store-path-rules/test.nix { }
-#
-# What it proves.
-#
-# The recipe exists because opensnitchd identifies a process by its ABSOLUTE
-# executable path, which on NixOS is a content-hashed store path that changes
-# whenever the package -- or any of its dependencies -- is rebuilt. A rule
-# holding a literal path silently stops matching after the next upgrade, and
-# under `DefaultAction = "deny"` that failure is a black hole: traffic just
-# stops. So the test has to demonstrate two things at once, and the second one
-# is what makes it more than a snapshot:
-#
-#   A. the generated rule matches the CURRENT store path of the target binary,
-#      checked against the path resolved at runtime inside the guest, and
-#   B. it keeps matching after the package is rebuilt at a NEW store path --
-#      whether the rebuild changed only the hash (a dependency bump) or the
-#      version string too.
-#
-# A naive module that stamped the authoring-time path into the rule passes (A)
-# and fails (B). That module is not hypothetical here: the `pinned` node runs
-# exactly it -- a hand-written `processPath` rule holding one literal store
-# path -- and the test asserts it BREAKS on the rebuilt binaries while the
-# recipe's rule keeps working. If the recipe ever regressed into pinning a
-# path, `shaped` and `pinned` would agree and the test would fail.
-#
-# Both halves are proved twice, at two different levels:
-#
-#   * behaviourally, end to end: `DefaultAction = "deny"`, opensnitchd running
-#     with the eBPF process monitor, and a real HTTP request to another VM. An
-#     allowed probe must fetch the page; a denied one must not. This is the
-#     only lane that proves the rule is actually IN the packet path -- and
-#     every deny is paired with a success from a byte-identical binary at a
-#     different store path on the same node to the same destination in the same
-#     run, so "it failed" cannot be confused with "the network was down".
-#
-#   * statically, on the rule file the module actually wrote to
-#     /var/lib/opensnitch/rules: the generated regex is matched against store
-#     paths resolved with `realpath` in the guest, and asserted to contain no
-#     literal store hash at all.
-#
-# Not covered: the GUI/database side of opensnitch (Trap 7), and rule
-# precedence ordering between declarative and runtime rules.
-#
-# Topology: `lib/nixos-test-topology` assigns the addresses. Note that its
-# Trap 4 (client and destination must sit on different subnets) does NOT apply
-# here -- opensnitch filters the client's OWN outbound connections on the
-# client itself, so there is no forward hook to bypass. The equivalent
-# "did the filter actually run" guard is the paired allow/deny control
-# described above.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
@@ -73,19 +16,6 @@ let
   echoPort = 8080;
   originUrl = "http://${topo.ip.origin.lan}:${toString echoPort}/";
 
-  # ---------------------------------------------------------------------------
-  # Probe binaries.
-  #
-  # Each one is a real, working curl at a store path we control the SHAPE of.
-  # Copying the ELF (rather than symlinking or wrapping) matters: opensnitchd
-  # reports the path of the executable that was exec'd, so the copy must be the
-  # thing on disk. Its RPATH still points at curl's own store outputs, which the
-  # reference scanner picks up, so the closure comes along for free.
-  #
-  # `salt` only exists to change the derivation hash, which is what produces
-  # "same package, same version, different store path" -- the dependency-bump
-  # rebuild that quietly breaks a hand-written rule.
-  # ---------------------------------------------------------------------------
   mkProbe =
     {
       pname ? "netprobe",
@@ -107,7 +37,6 @@ let
       exe = "${drv}/${dir}/${leaf}";
     };
 
-  # Must match `binaries.netprobe` (plain) after any rebuild.
   matching = {
     v1 = mkProbe { version = "1.0"; };
     v1-rebuilt = mkProbe {
@@ -118,8 +47,6 @@ let
     v3-unstable = mkProbe { version = "2.1-unstable-2026-07-28"; };
   };
 
-  # Must match `binaries.wrapprobe` (wrapped = true): both the wrapper and the
-  # `.NAME-wrapped` payload it exec's. See README "Trap 2".
   wrapped = {
     wrapper = mkProbe {
       pname = "wrapprobe";
@@ -134,8 +61,6 @@ let
     };
   };
 
-  # Must NOT match anything. These are the assertions an over-broad regex --
-  # `.*` for the hash, a missing `$`, a missing `^` -- fails.
   decoys = {
     foreign-pname = mkProbe {
       pname = "otherprobe";
@@ -153,8 +78,6 @@ let
       version = "1.0";
       dir = "libexec";
     };
-    # `wrapped = false` on `binaries.netprobe`, so the payload must NOT match --
-    # which is precisely why Trap 2 exists.
     unlisted-wrapper-payload = mkProbe {
       version = "1.0";
       leaf = ".netprobe-wrapped";
@@ -167,16 +90,6 @@ let
   storePaths = lib.mapAttrs (_: p: p.store) allProbes;
   probeClosure = lib.mapAttrsToList (_: p: p.drv) allProbes;
 
-  # ---------------------------------------------------------------------------
-  # Eval-time lint checks.
-  #
-  # The module's assertions are its own defence against the ways a store-path
-  # rule goes silently wrong (unanchored regex, zero operands, a `proc` monitor
-  # that loses short-lived processes). They are dead code unless something
-  # actually exercises them, and a VM cannot: an assertion failure aborts the
-  # evaluation before there is a machine to run. So they are checked here, in a
-  # plain non-VM evaluation, by reading `config.assertions` directly.
-  # ---------------------------------------------------------------------------
   failedMessages =
     extra:
     map (a: a.message) (
@@ -254,7 +167,6 @@ let
 
   lintFailures = builtins.filter (c: !c.ok) lintChecks;
 
-  # Shared by both filtering nodes: deny by default, eBPF process monitor.
   denyByDefault = {
     services.opensnitch.settings = {
       DefaultAction = "deny";
@@ -264,10 +176,13 @@ let
     system.extraDependencies = probeClosure;
     system.stateVersion = "25.05";
   };
+  withEvalGates =
+    script:
+    assert lib.assertMsg (lintFailures == [ ]) (
+      "eval-time lint checks failed: " + lib.concatMapStringsSep "; " (c: c.what) lintFailures
+    );
+    script;
 in
-assert lib.assertMsg (lintFailures == [ ]) (
-  "eval-time lint checks failed: " + lib.concatMapStringsSep "; " (c: c.what) lintFailures
-);
 pkgs.testers.runNixOSTest {
   name = "opensnitch-store-path-rules";
 
@@ -283,7 +198,6 @@ pkgs.testers.runNixOSTest {
         system.stateVersion = "25.05";
       };
 
-    # The recipe: rules keyed on the SHAPE of a store path.
     shaped =
       { ... }:
       {
@@ -312,9 +226,6 @@ pkgs.testers.runNixOSTest {
         };
       };
 
-    # The naive alternative, as a live control: one hand-written rule holding
-    # the literal store path of v1. It is what an adopter writes before reading
-    # the README, and the test asserts it breaks on every rebuild.
     pinned =
       { ... }:
       {
@@ -334,7 +245,7 @@ pkgs.testers.runNixOSTest {
       };
   };
 
-  testScript = ''
+  testScript = withEvalGates ''
     import json
     import re
 

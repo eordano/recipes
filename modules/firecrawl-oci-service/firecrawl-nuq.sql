@@ -1,25 +1,3 @@
--- Firecrawl "NuQ" Postgres-backed queue schema.
---
--- Vendored from https://github.com/firecrawl/firecrawl/blob/main/apps/nuq-postgres/nuq.sql
--- The Firecrawl image ships no migrations; the worker assumes this schema
--- already exists. Upstream's deploy story is a dedicated nuq-postgres
--- container, but this module runs Firecrawl against an existing shared
--- Postgres, so we apply the SQL ourselves from a systemd one-shot.
---
--- Differences from upstream:
---   * `ALTER SYSTEM SET ...` cluster-wide tuning (checkpoint/WAL/bgwriter/IO)
---     is removed -- the target Postgres may be shared with other tenants, and
---     the stock defaults are fine for a typical crawl load. Re-add it if you
---     run a dedicated cluster.
---   * `cron.unschedule(jobname)` sweep before scheduling, so the init is
---     idempotent on every pg_cron version (pre-1.6 cron.schedule errors on
---     duplicate jobname rather than upserting).
---
--- The DB role that Firecrawl connects as is passed in by the caller as the
--- psql variable `dbrole` (psql -v dbrole=<role>), so the grants at the bottom
--- can be applied without hard-coding a role name.
---
--- Fully idempotent; safe to re-run on every boot.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_cron;
@@ -38,8 +16,6 @@ EXCEPTION
   WHEN duplicate_object THEN null;
 END $$;
 
--- Idempotency: drop any previously scheduled nuq jobs so re-runs don't
--- depend on pg_cron's upsert-by-jobname semantics (added in pg_cron 1.6).
 DO $$
 DECLARE
   j text;
@@ -273,17 +249,8 @@ SELECT cron.schedule('cron_job_run_details_prune', '0 * * * *', $$
   DELETE FROM cron.job_run_details WHERE start_time < now() - interval '24 hours';
 $$);
 
--- The init runs as postgres (superuser, owns the nuq schema and everything in
--- it). The Firecrawl api+worker containers, however, connect as a separate DB
--- role -- which by default has no privileges on the nuq schema and gets
--- "permission denied for schema nuq" (42501) on getJobToProcess. Upstream's
--- deployment runs the worker as postgres itself, so it doesn't need this; here
--- we have a dedicated role (services.postgresql.ensureUsers). The role name is
--- supplied by the caller as psql variable `dbrole`.
 GRANT USAGE ON SCHEMA nuq TO :"dbrole";
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA nuq TO :"dbrole";
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA nuq TO :"dbrole";
--- Default privileges so future tables (e.g. when the vendored SQL is updated
--- to a newer upstream revision) are reachable without re-grant.
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA nuq GRANT ALL ON TABLES TO :"dbrole";
 ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA nuq GRANT ALL ON SEQUENCES TO :"dbrole";

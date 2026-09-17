@@ -1,13 +1,3 @@
-# garage-declarative-init
-#
-# Wrap upstream `services.garage` so the cluster layout, buckets, and access
-# keys are *declared in Nix* and reconciled idempotently on every boot, instead
-# of the imperative one-time CLI steps upstream leaves you with.
-#
-# Import this file as a NixOS module and configure `services.garage-manager`.
-# It is self-contained: no external cluster registry, no site-specific paths.
-# Parameterize everything site-specific through the options below.
-
 {
   config,
   pkgs,
@@ -28,8 +18,6 @@ let
 
   isMultiNode = cfg.replicationFactor > 1;
 
-  # Systemd mount units the data/metadata dirs live under (e.g. a ZFS dataset
-  # mount unit like "tank-archive.mount"). Empty for a plain local dir.
   mountUnits = cfg.requiresMounts;
 in
 {
@@ -332,12 +320,7 @@ in
         consistency_mode = "consistent";
 
         rpc_bind_addr =
-          if isMultiNode then
-            "${cfg.nodeAddress}:${toString rpcPort}"
-          else
-            # Single-node: bind RPC to loopback only. nginx never fronts RPC and
-            # no peer connects, so all-interfaces exposure ([::]) is unwanted.
-            "127.0.0.1:${toString rpcPort}";
+          if isMultiNode then "${cfg.nodeAddress}:${toString rpcPort}" else "127.0.0.1:${toString rpcPort}";
         rpc_public_addr =
           if isMultiNode then "${cfg.nodeAddress}:${toString rpcPort}" else "127.0.0.1:${toString rpcPort}";
         rpc_secret_file = cfg.rpcSecretFile;
@@ -348,14 +331,11 @@ in
 
         s3_api = {
           s3_region = "garage";
-          # Loopback only: nginx proxies to 127.0.0.1, so binding to all
-          # interfaces ([::]) would expose the unfronted S3 API directly.
           api_bind_addr = "127.0.0.1:${toString s3ApiPort}";
           root_domain = ".s3.garage.${domain}";
         };
 
         s3_web = {
-          # Loopback only; reached through the nginx web vhost (127.0.0.1).
           bind_addr = "127.0.0.1:${toString s3WebPort}";
           root_domain = ".web.garage.${domain}";
         };
@@ -375,9 +355,6 @@ in
         "d ${metadataDir} 0700 ${cfg.user} ${cfg.group} - -"
       ];
       services = {
-        # Create + chown the data/metadata dirs AFTER their mount is up, BEFORE
-        # the daemon starts. This is the ordering that keeps state on the right
-        # filesystem with the right owner.
         garage-setup-dirs = {
           description = "Create Garage storage directories";
           after = mountUnits;
@@ -406,17 +383,10 @@ in
           serviceConfig = {
             User = cfg.user;
             Group = cfg.group;
-            # TRAP: upstream's garage unit uses DynamicUser, which allocates a
-            # fresh uid per activation. On a persistent data mount that leaves
-            # on-disk files owned by a uid the next generation no longer maps to.
-            # Force it off so the uid stays stable across restarts/rebuilds.
             DynamicUser = lib.mkForce false;
           };
         };
 
-        # Idempotent, state-driven reconciler. Runs on every boot; picks the
-        # right action from the current layout state and skips anything already
-        # present.
         garage-init = {
           description = "Initialize Garage layout and create buckets";
           after = [ "garage.service" ];
@@ -521,7 +491,8 @@ in
                 echo "Key ${access.key} already exists with ID $ACCESS_KEY"
               else
                 echo "Importing key ${access.key} with ID $ACCESS_KEY"
-                garage key import --yes --name "${access.key}" "$ACCESS_KEY" "$SECRET_KEY"
+                garage key import --yes "$ACCESS_KEY" "$SECRET_KEY"
+                garage key rename "$ACCESS_KEY" "${access.key}" || true
               fi
 
               echo "Granting permissions to ${access.key} for bucket ${access.bucket}"
@@ -580,9 +551,6 @@ in
       };
     };
 
-    # RPC + admin ports are opened ONLY on the trusted interface, never on the
-    # default zone. S3 API/web are never opened here -- they reach the outside
-    # solely through the nginx vhosts above.
     networking.firewall = mkIf (cfg.trustedInterface != null) {
       interfaces.${cfg.trustedInterface}.allowedTCPPorts = [
         rpcPort

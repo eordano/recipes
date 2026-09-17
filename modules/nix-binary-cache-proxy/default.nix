@@ -1,27 +1,3 @@
-# nix-binary-cache-proxy
-#
-# A pure-nginx caching proxy in front of cache.nixos.org (or any binary cache).
-# No nix-serve, no separate daemon -- just nginx's own `proxy_cache_path`.
-#
-# Point every machine's `nix.settings.substituters` at this host and:
-#   - the same NAR is fetched from the WAN once, then served from local disk;
-#   - builds keep working while the upstream cache is unreachable
-#     (served stale via `proxy_cache_use_stale`).
-#
-# Drop-in usage:
-#   imports = [ ./nix-binary-cache-proxy ];
-#   modules.services.nix-cache = {
-#     enable   = true;
-#     domain   = "cache.example.com";
-#     acmeHost = "cache.example.com";   # a services.nginx / security.acme cert
-#   };
-#
-# Then on clients:
-#   nix.settings.substituters      = [ "https://cache.example.com" ];
-#   nix.settings.trusted-public-keys = [ "cache.nixos.org-1:6NCHdD..." ];
-# (Keep the upstream's public key -- this proxy passes NARs through verbatim,
-#  it does not re-sign them.)
-
 { config, lib, ... }:
 
 with lib;
@@ -148,11 +124,6 @@ in
         forceSSL = true;
         useACMEHost = cfg.acmeHost;
 
-        # The upstream is placed in a *variable* so nginx re-resolves it via
-        # `resolver` on every request. If you write the host literally in
-        # `proxy_pass`, nginx resolves it once at startup and freezes that IP
-        # until the next config reload -- which breaks when a CDN-backed cache
-        # rotates addresses.
         extraConfig = ''
           resolver ${cfg.resolver} valid=30s ipv6=off;
           set $upstream_endpoint ${cfg.upstreamEndpoint};
@@ -192,8 +163,6 @@ in
             };
           in
           (optionalAttrs (cfg.websiteDir != null) {
-            # Static-first: serve the site from disk, and only on a 404 fall
-            # through to the upstream proxy.
             "/" = {
               root = cfg.websiteDir;
               extraConfig = ''
@@ -209,8 +178,6 @@ in
             "/" = cached;
           }
           // {
-            # Pin the cache-info endpoint to the proxy so Nix clients always
-            # get a valid response even if the static dir shadows the name.
             "= /nix-cache-info" = cached;
           };
       };

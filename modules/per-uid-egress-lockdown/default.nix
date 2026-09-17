@@ -1,24 +1,3 @@
-# per-uid-egress-lockdown
-#
-# Run an untrusted program as its own uid, inside bubblewrap, with NO network
-# except a loopback CONNECT proxy that enforces a domain allowlist.
-#
-# The allowlist is enforced TWICE and the second one is the real one:
-#
-#   1. squid `http_access allow CONNECT <allowlist>` -- a policy the program
-#      only obeys while it honours HTTPS_PROXY. Advisory.
-#   2. an nftables `output` chain that drops EVERY packet owned by the sandbox
-#      uid except loopback traffic to the proxy port. Kernel-enforced; a
-#      program that ignores the proxy env vars gets ENETUNREACH, not the
-#      internet.
-#
-# Corollary, and the single easiest way to silently undo all of this: the proxy
-# MUST run as a DIFFERENT uid. Same uid => the proxy's own outbound packets are
-# matched by the sandbox's drop rule (proxy dies), and every rule you add to fix
-# that reopens the internet for the sandboxed program. The module asserts this.
-#
-# See README.md for the full trap list.
-
 {
   config,
   lib,
@@ -48,17 +27,22 @@ let
   proxyRuntimeDir = "${name}-squid";
   proxyRunPath = "/run/${proxyRuntimeDir}";
 
-  # ---------------------------------------------------------------- proxy ---
-  # Deny-by-default. Only CONNECT, only to SSL_ports, only to allowlisted
-  # domains. `cache deny all` keeps squid from retaining anything on disk.
   squidConf = pkgs.writeText "${name}-squid.conf" (
     ''
       http_port ${cfg.proxy.listenAddress}:${toString cfg.proxy.port}
+    ''
+    + optionalString (cfg.allowedDomains != [ ]) ''
       acl ${aclName} dstdomain ${concatStringsSep " " cfg.allowedDomains}
+    ''
+    + ''
       acl SSL_ports port ${concatMapStringsSep " " toString cfg.proxy.sslPorts}
       acl CONNECT method CONNECT
       http_access deny CONNECT !SSL_ports
+    ''
+    + optionalString (cfg.allowedDomains != [ ]) ''
       http_access allow CONNECT ${aclName}
+    ''
+    + ''
       http_access deny all
       cache deny all
       access_log ${cfg.proxy.accessLog}
@@ -69,12 +53,6 @@ let
     + optionalString (cfg.proxy.extraConfig != "") (cfg.proxy.extraConfig + "\n")
   );
 
-  # ------------------------------------------------------------- lockdown ---
-  # `policy accept` with explicit per-uid drops: this table only ever narrows
-  # the two uids it names and never touches anybody else's traffic.
-  #
-  # `meta skuid` is the KERNEL uid that owns the socket. A process that made
-  # itself "root" inside a user namespace is still the sandbox uid here.
   ruleLines = [
     ''meta skuid ${toString cfg.uid} oifname "lo" ct state established,related accept''
     ''meta skuid ${toString cfg.uid} oifname "lo" tcp dport ${toString cfg.proxy.port} accept''
@@ -101,9 +79,6 @@ let
 
   ruleBody = concatStringsSep "\n" (map (l: if l == "" then "" else "    " + l) ruleLines);
 
-  # Written as `table` / `delete table` / `table { ... }` so a re-run replaces the
-  # table atomically. The bare `table inet <name>` first line exists only so the
-  # `delete` cannot fail on a fresh boot where the table does not exist yet.
   egressRules = pkgs.writeText "${name}-egress.nft" ''
     table inet ${tableName}
     delete table inet ${tableName}
@@ -116,7 +91,6 @@ let
     }
   '';
 
-  # ------------------------------------------------------------- launcher ---
   sandboxPath = lib.makeBinPath cfg.launcher.packages;
 
   bindArg =
@@ -142,8 +116,6 @@ let
     dest: file: "--ro-bind ${escapeShellArg file} ${dest}"
   ) cfg.launcher.secretFiles;
 
-  # Readability of every secret is checked at RUNTIME, not at eval. A missing
-  # secret must fail this one wrapper, never the whole host's evaluation.
   secretChecks = mapAttrsToList (
     _: file:
     ''[ -r ${escapeShellArg file} ] || { echo "missing or unreadable secret: ${file}" >&2; exit 1; }''
@@ -156,11 +128,6 @@ let
     done
   '';
 
-  # Assembled as a LIST and joined, never as a here-doc with interpolated
-  # optional lines. An optional line that expands to "" leaves a whitespace-only
-  # line with no trailing backslash, which ENDS the `exec bwrap` command: the
-  # next `--...` line then becomes a command name. With the default
-  # `sourceDir = null` + `mountStage.enable = false` that happened twice.
   bwrapArgs = [
     "--unshare-all --share-net"
     "--die-with-parent --new-session"
@@ -285,7 +252,8 @@ in
       description = ''
         squid `dstdomain` allowlist. A leading dot matches the domain and all
         of its subdomains; without it the match is exact. Empty means the
-        sandbox can reach nothing at all (still a valid, if useless, config).
+        sandbox can reach nothing at all: the acl and its allow rule are
+        omitted and squid runs deny-all.
       '';
     };
 
@@ -636,16 +604,13 @@ in
     ];
 
     warnings =
-      lib.optional (config.networking.nftables.enable && config.networking.nftables.flushRuleset) ''
-        services.perUidEgressLockdown: networking.nftables.flushRuleset is on. Every
-        start or reload of nftables.service runs `flush ruleset`, deleting the
-        inet ${tableName} table until ${name}-egress-lockdown.service next runs.
-        The sandbox uid is UNFILTERED (fail-open) in that window.
-      ''
-      ++ lib.optional (cfg.allowedDomains == [ ]) ''
-        services.perUidEgressLockdown: allowedDomains is empty; the sandbox has no
-        reachable destination at all.
-      '';
+      lib.optional (config.networking.nftables.enable && config.networking.nftables.flushRuleset)
+        ''
+          services.perUidEgressLockdown: networking.nftables.flushRuleset is on. Every
+          start or reload of nftables.service runs `flush ruleset`, deleting the
+          inet ${tableName} table until ${name}-egress-lockdown.service next runs.
+          The sandbox uid is UNFILTERED (fail-open) in that window.
+        '';
 
     users.groups.${cfg.user} = { };
     users.groups.${cfg.proxyUser} = { };
@@ -679,9 +644,6 @@ in
       ]
     );
 
-    # NOTE the shape: `systemd.services.<n> = mkIf false { ... }` still creates
-    # the ATTRIBUTE, and an attrsOf-submodule then materialises an empty unit
-    # with that name. The mkIf has to sit on the attrset, not on the unit.
     systemd.services = lib.mkMerge [
       (mkIf cfg.mountStage.enable {
         ${cfg.mountStage.unitName} = {

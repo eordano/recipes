@@ -1,16 +1,3 @@
-# self-hosted-firefox-sync
-#
-# Run your own Firefox Sync (syncstorage-rs) bundled with its MariaDB backend
-# in a single, hand-built OCI image. This deliberately avoids NixOS's
-# `services.firefox-syncserver`; instead the container's entrypoint boots
-# mariadbd, waits for it, creates the databases, then execs syncserver.
-#
-# Import this module, set `enable`, `domain`, `acmeHost`, and `secretsFile`.
-#
-# See README.md for the boot-DB-then-exec entrypoint pattern and the three
-# traps this encodes (uid/gid agreement, the hardcoded 8000 port, and host
-# networking).
-
 {
   config,
   pkgs,
@@ -22,9 +9,6 @@ with lib;
 let
   cfg = config.modules.services.firefox-sync;
 
-  # Entrypoint: bring MariaDB up in the background, wait for it, create the
-  # syncstorage/tokenserver databases, then hand the container's PID 1 to
-  # syncserver via exec.
   entrypoint = pkgs.writeShellScript "firefox-sync-entrypoint" ''
     set -e
     mkdir -p /var/lib/mysql /run/mysqld
@@ -34,9 +18,8 @@ let
       ${pkgs.mariadb}/bin/mysql_install_db --user=mysql --datadir=/var/lib/mysql
     fi
 
-    # Bind to loopback only. Under `--network=host` the container shares the
-    # host net namespace, so 0.0.0.0 would put 3306 on every routable
-    # interface; syncserver (also host-networked) reaches it on 127.0.0.1.
+    # Bind to loopback only: the database never leaves the container's own
+    # network namespace, syncserver reaches it on 127.0.0.1 from inside.
     ${pkgs.mariadb}/bin/mariadbd --user=mysql --datadir=/var/lib/mysql --bind-address=127.0.0.1 &
     mariadb_pid=$!
 
@@ -65,9 +48,6 @@ let
     exec ${pkgs.syncstorage-rs}/bin/syncserver
   '';
 
-  # The image has no real user database, so we ship one. The `mysql` uid/gid
-  # here MUST equal cfg.uid/cfg.gid (see below) or mariadbd inside the
-  # container cannot read the bind-mounted, host-owned datadir.
   passwdFile = pkgs.writeTextDir "etc/passwd" ''
     root:x:0:0:root:/root:/bin/bash
     mysql:x:${toString cfg.uid}:${toString cfg.gid}:MariaDB:/var/lib/mysql:/bin/false
@@ -76,6 +56,8 @@ let
     root:x:0:
     mysql:x:${toString cfg.gid}:
   '';
+
+  nodeUrl = "https://ffsync.${cfg.domain}";
 
   firefoxSyncImage = pkgs.dockerTools.buildLayeredImage {
     name = "firefox-sync";
@@ -86,6 +68,7 @@ let
       bash
       coreutils
       gnugrep
+      gnused
       cacert
       passwdFile
       groupFile
@@ -94,6 +77,17 @@ let
       Cmd = [ "${entrypoint}" ];
       Env = [
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        "SYNC_HUMAN_LOGS=1"
+        "SYNC_HOST=0.0.0.0"
+        "SYNC_SYNCSTORAGE__DATABASE_URL=mysql://root@127.0.0.1:3306/syncstorage"
+        "SYNC_TOKENSERVER__ENABLED=true"
+        "SYNC_TOKENSERVER__NODE_TYPE=mysql"
+        "SYNC_TOKENSERVER__DATABASE_URL=mysql://root@127.0.0.1:3306/tokenserver"
+        "SYNC_TOKENSERVER__FXA_EMAIL_DOMAIN=api.accounts.firefox.com"
+        "SYNC_TOKENSERVER__FXA_OAUTH_SERVER_URL=https://oauth.accounts.firefox.com/v1"
+        "SYNC_TOKENSERVER__RUN_MIGRATIONS=true"
+        "SYNC_TOKENSERVER__ADDITIONAL_BLOCKING_THREADS_FOR_FXA_REQUESTS=10"
+        "SYNC_TOKENSERVER__NODE_CAPACITY_RELEASE_RATE=1"
       ];
     };
   };
@@ -180,6 +174,27 @@ in
       '';
     };
 
+    nodeCapacity = mkOption {
+      type = types.int;
+      default = 10;
+      description = ''
+        How many Firefox accounts the single storage node advertises to the
+        tokenserver. Registered as node 1 (`https://ffsync.<domain>`) once
+        the tokenserver has created its tables.
+      '';
+    };
+
+    backend = mkOption {
+      type = types.enum [
+        "podman"
+        "docker"
+      ];
+      default = "podman";
+      description = ''
+        OCI backend the container runs on; the unit is `<backend>-firefox-sync`
+        and `virtualisation.oci-containers.backend` (one per host) is set to it.
+      '';
+    };
     extraPodmanOptions = mkOption {
       type = types.listOf types.str;
       default = [ ];
@@ -225,19 +240,36 @@ in
       "d ${cfg.mariadbDataDir} 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
     ];
 
-    systemd.services.podman-firefox-sync.preStart = lib.mkAfter ''
-      mkdir -p ${cfg.dataDir} ${cfg.mariadbDataDir}
-    '';
+    systemd.services."${cfg.backend}-firefox-sync" = {
+      preStart = lib.mkAfter ''
+        mkdir -p ${cfg.dataDir} ${cfg.mariadbDataDir}
+      '';
+      postStart = ''
+        mysql="${config.virtualisation.${cfg.backend}.package}/bin/${cfg.backend} exec -i firefox-sync ${pkgs.mariadb}/bin/mysql -u root tokenserver"
+        ready() { $mysql -Ne 'SHOW TABLES' 2>/dev/null | grep -qx services; }
+        until ready; do sleep 2; [ $SECONDS -gt 180 ] && break; done
+        ready || { echo "firefox-sync: tokenserver tables never appeared, node not registered" >&2; exit 1; }
+        $mysql <<'SQL'
+        BEGIN;
+        INSERT INTO services (service, pattern)
+          SELECT 'sync-1.5', '{node}/1.5/{uid}'
+          WHERE NOT EXISTS (SELECT 1 FROM services WHERE service = 'sync-1.5');
+        SET @svc = (SELECT id FROM services WHERE service = 'sync-1.5');
+        INSERT INTO nodes (id, service, node, available, current_load, capacity, downed, backoff)
+          VALUES (1, @svc, '${nodeUrl}', ${toString cfg.nodeCapacity}, 0, ${toString cfg.nodeCapacity}, 0, 0)
+          ON DUPLICATE KEY UPDATE service=@svc, node='${nodeUrl}', capacity=${toString cfg.nodeCapacity};
+        COMMIT;
+        SQL
+      '';
+    };
 
-    virtualisation.oci-containers.backend = "podman";
+    virtualisation.oci-containers.backend = cfg.backend;
     virtualisation.oci-containers.containers.firefox-sync = {
       imageFile = firefoxSyncImage;
       image = "firefox-sync:latest";
       environmentFiles = [ cfg.secretsFile ];
-      extraOptions = [
-        "--network=host"
-      ]
-      ++ cfg.extraPodmanOptions;
+      ports = [ "127.0.0.1:${toString cfg.port}:8000" ];
+      extraOptions = cfg.extraPodmanOptions;
       volumes = [
         "${cfg.dataDir}:/data"
         "${cfg.mariadbDataDir}:/var/lib/mysql"

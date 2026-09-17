@@ -1,19 +1,3 @@
-# netflow-capture -- declarative per-interface NetFlow/IPFIX capture with nfdump's nfpcapd.
-#
-# Turns `nfpcapd` (from the `nfdump` package) into a NixOS service that models an
-# arbitrary set of named packet-capture listeners as a submodule option tree. Each
-# listener becomes its own `nfpcapd-<name>` systemd unit with independent worker
-# threads, socket-buffer size, flow-expiration windows, rotation window, and an
-# optional raw-pcap sidecar. Storage directories are auto-created via tmpfiles.
-#
-# Import it and set `services.nfpcapd.enable = true;` plus at least one listener.
-#
-# The two traps that make this non-obvious are documented inline below:
-#   1. The unit runs as User=root even though nfpcapd is handed -u/-g: root is
-#      required to open the raw capture socket, then nfpcapd drops privilege to
-#      the unprivileged user itself.
-#   2. nfpcapd will NOT create missing output paths, so every listener's output
-#      subdir must be pre-created by tmpfiles or the daemon exits immediately.
 {
   lib,
   config,
@@ -181,8 +165,6 @@ in
       }
     ];
 
-    # nfpcapd refuses to create missing output directories, so pre-create the base
-    # storage dir, every listener's per-interface subdir, and any raw-pcap sidecar dir.
     systemd.tmpfiles.rules = [
       "d ${cfg.storageDir} 0750 ${cfg.user} ${cfg.group}"
     ]
@@ -254,9 +236,6 @@ in
                       if interfaceCfg.verboseMode then "-E" else ""
                     } ${interfaceCfg.additionalOptions} ${cfg.globalAdditionalOptions}'';
                 Type = "simple";
-                # Root is required to open the raw capture socket; nfpcapd then
-                # drops to -u/-g itself. Do NOT set User=${cfg.user} here or the
-                # socket open fails with EPERM.
                 User = "root";
                 Group = "root";
                 ProtectHome = true;

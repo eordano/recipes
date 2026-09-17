@@ -23,8 +23,6 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Plain readiness beacon: fires as soon as the network is up. Answers
-    # "what address do I SSH to?" on a machine you just rebooted blind.
     systemd.services.boot-beacon = {
       description = "Beacon: host has an IP and is ready for SSH";
       wantedBy = [ "multi-user.target" ];
@@ -49,10 +47,6 @@ in
       '';
     };
 
-    # Tailnet beacon: only exists when tailscale is enabled. Answers
-    # "did this box rejoin the tailnet?" after an unattended reboot/reinstall.
-    # Resolved through config.services.tailscale.package so a pinned override
-    # is honoured.
     systemd.services.tailscale-beacon = lib.mkIf config.services.tailscale.enable {
       description = "Beacon: host joined tailscale";
       wantedBy = [ "multi-user.target" ];

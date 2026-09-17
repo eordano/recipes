@@ -1,29 +1,3 @@
-# nginx-opinionated-defaults
-#
-# A NixOS module that layers opinionated defaults onto `services.nginx`, plus a
-# handful of per-virtual-host knobs. Drop it into `imports` and it augments the
-# stock nginx module in place (it does not replace it).
-#
-# What it gives you:
-#   * A custom access-log format that captures the `Host` header. The stock
-#     `combined` format omits it, which blinds any multi-vhost log analysis
-#     (goaccess, fail2ban, ad-hoc grep) because every request looks like it hit
-#     the same server.
-#   * HSTS on every https response, defined once as an http-block `map`.
-#   * Custom "recommended" TLS session/cipher settings, kept as our own block
-#     rather than upstream's `recommendedTlsSettings` so this module's cipher
-#     choices stay decoupled from upstream churn. Kept at parity with upstream's
-#     post-quantum key-exchange group (`X25519MLKEM768`).
-#   * Real-client-IP extraction from Cloudflare's officially published IP-range
-#     list, both globally and per-vhost.
-#   * Per-vhost overrides: `proxyTimeout`, `clientMaxBodySize`, `extraSecurity`
-#     (a baseline security-header set, off by default because the aggressive
-#     COEP header breaks apps that embed cross-origin resources, e.g. Immich).
-#
-# This module has no private wiring. The only thing you must supply from outside
-# is a path to Cloudflare's IP-range file if you want the real-IP feature (see
-# `cloudflareIPRangesFile` below and the README).
-
 {
   lib,
   config,
@@ -33,14 +7,6 @@
 let
   cfg = config.services.nginx;
 
-  # Baseline security headers prepended to any vhost that opts into
-  # `extraSecurity`. Two traps live here:
-  #   * `$hsts_header` is an nginx *variable*; it must be defined in the http
-  #     block (see `enableHSTSEverywhere`) or nginx refuses to start.
-  #   * `Cross-Origin-Embedder-Policy: require-corp` is aggressive: it breaks any
-  #     page that loads cross-origin subresources without CORP/CORS headers.
-  #     That is exactly why `extraSecurity` is off by default per vhost -- turn it
-  #     on only for vhosts you know are self-contained.
   defaultSecurityHeaders = ''
     add_header Strict-Transport-Security $hsts_header;
     add_header 'Referrer-Policy' 'origin-when-cross-origin';
@@ -49,10 +15,6 @@ let
     add_header Cross-Origin-Embedder-Policy "require-corp";
   '';
 
-  # Turn Cloudflare's published IP-range list (one CIDR per line) into a block of
-  # `set_real_ip_from` directives plus the CF-Connecting-IP wiring. Emits nothing
-  # if no file was configured (guarded by an assertion below when a feature that
-  # needs it is enabled).
   cloudflareRealIPConfig = lib.optionalString (cfg.cloudflareIPRangesFile != null) ''
     ${builtins.concatStringsSep "\n" (
       map (ip: "set_real_ip_from ${ip};") (
@@ -63,7 +25,6 @@ let
     real_ip_recursive on;
   '';
 
-  # Any per-vhost use of the Cloudflare real-IP feature also needs the file.
   anyVhostUsesCloudflareRealIP = lib.any (vh: vh.useCloudflareRealIP) (
     lib.attrValues cfg.virtualHosts
   );
@@ -213,8 +174,6 @@ in
         recommendedGzipSettings = lib.mkDefault true;
         recommendedOptimisation = lib.mkDefault true;
         recommendedProxySettings = lib.mkDefault true;
-        # Disabled on purpose: we supply our own TLS block (customRecommendedTlsSettings)
-        # kept at parity with this block, decoupled from upstream churn.
         recommendedTlsSettings = lib.mkDefault false;
 
         sslCiphers = "AES256+EECDH:AES256+EDH:!aNULL";
@@ -230,8 +189,6 @@ in
         '';
 
         appendHttpConfig = lib.mkMerge [
-          # mkBefore so the custom log_format is defined before anything that
-          # might reference it, and so our access_log wins.
           (lib.mkBefore ''
             log_format combined_with_host '$remote_addr - $remote_user [$time_local] '
                 '"$request" $status $body_bytes_sent '

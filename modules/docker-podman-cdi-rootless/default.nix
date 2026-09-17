@@ -1,17 +1,3 @@
-# docker-podman-cdi-rootless
-#
-# One toggleable NixOS module that flips between Docker and Podman (with
-# docker-compat) behind a single flag, while decoupling the "container
-# engine choice" from the "CDI / rootless hardening" knobs.
-#
-# The reusable insight: whichever engine you pick, GPU passthrough via CDI
-# and rootless operation are host-independent policy. Wire them once here
-# instead of copy-pasting daemon settings into every host.
-#
-# Trap this encodes: `features.cdi` must be set on BOTH the root daemon and
-# the rootless daemon settings. The rootless daemon is a *separate* dockerd
-# with its own settings block, so a `features.cdi` on the root daemon alone
-# leaves rootless GPU workloads broken.
 {
   config,
   lib,
@@ -102,32 +88,26 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # --- Podman branch: rootless by design, docker CLI compat shim on ---
     virtualisation.podman = lib.mkIf cfg.usePodman {
       enable = true;
       dockerCompat = true;
       extraPackages = cfg.podmanExtraPackages;
     };
 
-    # --- Docker branch ---
     virtualisation.docker = lib.mkIf (!cfg.usePodman) {
       enable = true;
       enableOnBoot = true;
       autoPrune.enable = cfg.autoPrune;
       inherit (cfg) storageDriver;
 
-      # Root daemon settings.
       daemon.settings = lib.mkIf cfg.enableCdi {
         features.cdi = true;
       };
 
-      # Rootless companion daemon -- a SEPARATE dockerd with its OWN settings.
       rootless = lib.mkIf cfg.enableRootless {
         enable = true;
         setSocketVariable = true;
         daemon.settings = {
-          # CDI must be repeated here; the root daemon's setting does not
-          # carry over to the rootless daemon. This is the load-bearing trap.
           features.cdi = lib.mkIf cfg.enableCdi true;
           inherit (cfg) dns;
         };

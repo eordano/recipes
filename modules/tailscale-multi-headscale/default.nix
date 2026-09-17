@@ -1,26 +1,3 @@
-# tailscale-multi-headscale
-#
-# Run one primary tailscaled plus any number of *extra* tailscaled instances,
-# each joined to a SEPARATE Headscale server, on a single NixOS host -- and
-# survive the two non-obvious traps this creates (see README.md):
-#
-#   1. The primary daemon's `ts-input` chain drops CGNAT-range (100.64/10)
-#      traffic that isn't "its own", which silently includes every extra
-#      instance's peers. Fix: insert an early ACCEPT for each `ts-<name>`
-#      interface ahead of that drop (`tailscale-firewall-fix-<name>`).
-#
-#   2. A Tailscale exit node installs a default route (table 52) via an ip-rule
-#      at priority 5270 that hijacks local RFC1918 subnets -- breaking Docker /
-#      libvirt / LAN reachability. Fix: pin 172.16/12 and 192.168/16 back to the
-#      `main` table with an ip-rule at priority 5269, just ahead of Tailscale's
-#      (`local-network-tailscale-routing-fix`).
-#
-# This module carries NO secret-management wiring. Preauth keys are supplied as
-# runtime file paths (`authKeyFile`), which you can populate with agenix,
-# sops-nix, systemd credentials, or a plain root-only file -- your choice.
-#
-# Drop-in: import this file as a NixOS module and set
-# `modules.tailscale.enable = true`.
 {
   config,
   options,
@@ -62,10 +39,6 @@ let
     allRoutes != [ ]
   ) "--advertise-routes=${lib.concatStringsSep "," allRoutes}";
 
-  # Shared `tailscale up` bootstrap. Reads the preauth key from a file at
-  # activation, only forces a re-auth when the daemon reports it is not
-  # currently logged in, and (optionally) retries setting an exit node until it
-  # appears in the netmap.
   mkInitScript =
     {
       scriptName,
@@ -82,9 +55,6 @@ let
       upFlags =
         preAuthFlags
         ++ [
-          # `file:` makes tailscale read the key from the path itself, so the
-          # secret never appears in this process's argv (/proc/<pid>/cmdline,
-          # `ps`) during activation -- only the file path does.
           "--authkey=file:${authKeyPath}"
           "\${FORCE_REAUTH:+$FORCE_REAUTH}"
         ]
@@ -199,10 +169,6 @@ in
       description = "Accept subnet routes advertised by other nodes.";
     };
 
-    # The DERP relay is optional. It is only wired if `derperDomain` is set and
-    # you have a `services.derp-server` module available (e.g. from a flake
-    # input). Leave `derperDomain = null` and set `withoutDerp = true` to run an
-    # exit node that does not participate in the DERP map.
     derperDomain = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -371,9 +337,6 @@ in
         ))
       ];
 
-      # Only turn on IP forwarding where the host actually routes (exit node or
-      # subnet router) -- so enabling this module on a plain client doesn't quietly
-      # make it a router.
       boot.kernel.sysctl =
         let
           anyForwarding =
@@ -385,8 +348,6 @@ in
           "net.ipv6.conf.all.forwarding" = lib.mkForce true;
         };
 
-      # Per-instance CLI wrapper: `tailscale-<name> <args>` talks to that
-      # instance's control socket.
       environment.systemPackages = lib.mkMerge [
         (map (
           name:
@@ -418,9 +379,6 @@ in
       };
 
       systemd.services = lib.mkMerge [
-        # TRAP 2 -- exit-node default route hijacks local RFC1918 subnets.
-        # Pin 172.16/12 (Docker bridges) and 192.168/16 (LAN) back to the main
-        # table at ip-rule priority 5269, just ahead of Tailscale's 5270.
         (lib.mkIf
           (
             cfg.enable
@@ -453,11 +411,6 @@ in
         )
 
         (lib.mkIf cfg.enable {
-          # A switch that stops tailscaled cuts the very tunnel it is being
-          # delivered over, so the rest of the activation -- including starting
-          # the daemon again -- never runs, and the host is simply gone until
-          # someone reaches it another way. Restarting in place keeps the gap to
-          # the daemon's own startup instead of spanning the whole switch.
           tailscaled.stopIfChanged = false;
 
           tailscale-init = {
@@ -490,10 +443,6 @@ in
           };
         })
 
-        # TRAP 1 -- the primary daemon's `ts-input` chain CGNAT-drops every extra
-        # instance's peers. Insert an early ACCEPT for each `ts-<name>` interface
-        # ahead of that drop. Probes both iptables and nftables backends and
-        # no-ops if `ts-input` is absent (primary running --netfilter-mode=off).
         (lib.mkMerge (
           map (
             name:
@@ -574,10 +523,6 @@ in
           ) (lib.attrNames cfg.extraInstances)
         ))
 
-        # Per extra instance: its own tailscaled + its own init bootstrap.
-        # Extra instances run --netfilter-mode=off so they never fight the
-        # primary daemon's netfilter rules (the firewall-fix above re-opens the
-        # one ACCEPT they actually need).
         (lib.mkMerge (
           map (
             name:
@@ -642,12 +587,6 @@ in
           ) (lib.attrNames cfg.extraInstances)
         ))
 
-        # Safety net: `tailscale up --reset` clears the configured exit node and
-        # mkInitScript's re-set loop retries only ~60s before giving up WITHOUT
-        # failing the unit. A slow boot (no wifi, Headscale unreachable, exit node
-        # not yet in the netmap) would otherwise strand the host with no exit
-        # node. This oneshot (driven by a 2-min timer below) re-applies it
-        # whenever it is found missing.
         (lib.mkIf (cfg.enable && cfg.useExitNode != null) {
           tailscale-exit-node-ensure = {
             description = "Re-apply exit node ${cfg.useExitNode} when it is not active";
@@ -683,14 +622,6 @@ in
       };
     }
 
-    # Optional co-located DERP relay. `services.derp-server` is NOT part of
-    # nixpkgs -- it comes from an external flake input. We only emit this block
-    # when that option is actually declared in your configuration; otherwise it
-    # is skipped entirely (so importing this module without the derp-server
-    # module still evaluates). If you want an exit node but have no derp-server
-    # module, set `withoutDerp = true`. `mkIf false` would NOT be enough here:
-    # a definition for an undeclared option is an eval error regardless of its
-    # condition, hence the `optionalAttrs` existence guard.
     (lib.optionalAttrs (options.services ? derp-server) {
       services.derp-server = lib.mkIf (cfg.enable && cfg.exitNode && cfg.derperDomain != null) {
         enable = lib.mkDefault true;

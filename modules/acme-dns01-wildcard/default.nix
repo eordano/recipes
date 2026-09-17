@@ -1,40 +1,3 @@
-# acme-dns01-wildcard
-#
-# A thin `acmeCerts` wrapper over `security.acme.certs` that makes DNS-01
-# wildcard certificates painless -- and, crucially, makes lego's propagation
-# check survive a split-horizon / local-caching resolver.
-#
-# The load-bearing trick lives in `extraLegoFlags`:
-#
-#   --dns.propagation-disable-ans  disable lego's own "authoritative nameserver"
-#                                  completion pre-check (the modern flag; lego's
-#                                  older `--dns.disable-cp` is now deprecated --
-#                                  see the 2026-07-28 README note)
-#   --dns.resolvers=...            pin the resolvers lego queries for the ACME
-#                                  TXT record to the zone's real authoritative
-#                                  nameservers (+ optionally 127.0.0.1)
-#
-# Without this, lego resolves the `_acme-challenge` TXT through the host's
-# configured resolver. Behind split-horizon DNS (a local unbound/dnsmasq,
-# a VPN resolver, or a caching resolver that shadows the public zone) that
-# lookup either returns the internal view or a stale/empty answer, so lego
-# concludes the record "never propagated" and the issuance times out -- even
-# though the TXT is live on the public authoritative servers. Pointing lego
-# straight at the authoritative resolvers sidesteps the local view entirely.
-#
-# Import as a NixOS module, then declare certs by domain name:
-#
-#   acmeCerts."example.com" = {
-#     wildcard        = true;                       # adds *.example.com
-#     credentialsFile = config.age.secrets.dns-token.path;
-#     resolvers       = [ "ns1.provider.net:53" "ns2.provider.net:53" ];
-#   };
-#
-# This module intentionally carries no secret-name table and no provider
-# assumptions: every cert names its own credentials file, DNS provider and
-# authoritative resolvers. Wire the credentialsFile to whatever secret
-# manager you use (agenix/sops-nix/plain path).
-
 { config, lib, ... }:
 
 let
@@ -142,9 +105,6 @@ in
     inherit (attrs) group dnsProvider;
     environmentFile = attrs.credentialsFile;
 
-    # Keep the propagation check ON -- the wait is what prevents Let's Encrypt
-    # from validating before the TXT exists. The propagation-disable-ans flag
-    # + pinned resolvers below change *how* that check is performed, not whether.
     dnsPropagationCheck = true;
 
     extraDomainNames = (lib.optional attrs.wildcard "*.${domain}") ++ attrs.extraDomainNames;

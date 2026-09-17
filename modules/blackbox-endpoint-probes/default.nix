@@ -8,15 +8,6 @@ with lib;
 let
   cfg = config.services.blackboxEndpointProbes;
 
-  # Blackbox exporter probe modules.
-  #
-  # TRAP: `http_2xx` deliberately lists 4xx codes in `valid_status_codes`, so it
-  # only fails on connection/TLS/timeout errors -- a 404 still reads as SUCCESS.
-  # That makes it a "server is up and routing" check. Use `http_strict_2xx`
-  # (empty list = real 2xx-only) for any endpoint where a 4xx should page.
-  #
-  # All modules pin IPv4 (`preferred_ip_protocol = "ip4"`) so a probe result
-  # doesn't silently depend on the box's IPv6 reachability.
   defaultModules = {
     http_2xx = {
       prober = "http";
@@ -159,22 +150,11 @@ in
         scrape_timeout = cfg.probeTimeout;
         metrics_path = "/probe";
 
-        # Group targets by blackbox module. Each static_config carries the
-        # module name as a custom `__blackbox_module` meta-label so the relabel
-        # stage below can turn it into the `module` query param.
         static_configs = map (m: {
           labels.__blackbox_module = m;
           targets = map (t: t.url) (filter (t: t.module == m) cfg.targets);
         }) (lib.unique (map (t: t.module) cfg.targets));
 
-        # The standard, non-obvious blackbox relabel indirection. Without it,
-        # Prometheus would try to scrape each target URL directly instead of
-        # asking the exporter to probe it:
-        #   1. copy the target (`__address__`) into `__param_target`
-        #   2. copy the meta-label into `__param_module`
-        #   3. keep the target URL as the `instance` label (readable in graphs)
-        #   4. rewrite `__address__` to the exporter itself, so the actual HTTP
-        #      GET becomes  http://<exporter>/probe?target=<url>&module=<module>
         relabel_configs = [
           {
             source_labels = [ "__address__" ];
@@ -193,10 +173,6 @@ in
             replacement = "${cfg.listenAddress}:${toString cfg.port}";
           }
         ]
-        # Trailing per-target relabel: map each probed URL back to its short
-        # `service` label. The URL is `lib.escapeRegex`'d so a target containing
-        # regex metacharacters (?, +, . ...) can't accidentally match and
-        # mislabel a different target.
         ++ (map (t: {
           source_labels = [ "__param_target" ];
           regex = lib.escapeRegex t.url;

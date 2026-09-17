@@ -1,18 +1,3 @@
-# Encrypted DNS (DNSCrypt / DoH) fronted by a dnsmasq cache.
-#
-# Two traps this module handles so you don't have to:
-#
-#   1. Cloaking rules from networking.hosts
-#      Encrypted upstream resolution bypasses /etc/hosts. So on every preStart
-#      we regenerate networking.hosts into a dnscrypt-proxy cloaking file, which
-#      is how local host overrides survive an encrypted upstream.
-#
-#   2. Serve-stale during WAN outages / bufferbloat
-#      dnsmasq's use-stale-cache keeps popular names resolving instantly from
-#      expired cache entries when the upstream is briefly unreachable, instead
-#      of failing the lookup.
-#
-# Import it and set `modules.dnscrypt-proxy.enable = true;`.
 {
   config,
   lib,
@@ -21,6 +6,28 @@
 }:
 let
   cfg = config.modules.dnscrypt-proxy;
+
+  stampsIn =
+    file:
+    let
+      chunks = lib.drop 1 (lib.splitString "\n## " ("\n" + builtins.readFile file));
+      entry =
+        chunk:
+        let
+          chunkLines = lib.splitString "\n" chunk;
+          name = lib.removeSuffix "\r" (lib.head chunkLines);
+          stamps = lib.filter (l: lib.hasPrefix "sdns://" l) chunkLines;
+        in
+        lib.optionalAttrs (stamps != [ ]) {
+          ${name} = lib.removeSuffix "\r" (lib.head stamps);
+        };
+    in
+    lib.foldl' (acc: chunk: acc // (entry chunk)) { } chunks;
+
+  knownStamps = lib.foldr (file: acc: acc // (stampsIn file)) { } cfg.resolverLists;
+  pinResolvers = cfg.resolverLists != [ ];
+  missingStamps = lib.filter (name: !(knownStamps ? ${name})) cfg.serverNames;
+  firewallInterfaces = lib.filter (i: i != "lo") cfg.dnsmasq.bindInterfaces;
 in
 {
   options = {
@@ -58,7 +65,7 @@ in
           description = "Serve expired cache entries when the upstream is unreachable (dnsmasq --use-stale-cache). Keeps popular names resolving instantly during WAN outages/bufferbloat instead of failing.";
         };
       };
-      openFirewall = lib.mkEnableOption "opening the firewall port";
+      openFirewall = lib.mkEnableOption "opening the firewall port (per interface in dnsmasq.bindInterfaces, excluding lo; on every interface when that list is empty)";
       dnscryptCache = lib.mkEnableOption "dnscrypt-proxy's own in-process DNS cache (a second cache layer in front of the WAN, on top of dnsmasq)";
       doh = lib.mkEnableOption "DNS over HTTPS support";
       dohPort = lib.mkOption {
@@ -92,24 +99,26 @@ in
           description = "Obtain the DoH virtualHost certificate via security.acme (requires security.acme.acceptTerms and a contact email). Set to false if you provision the certificate yourself; then attach useACMEHost or sslCertificate to the virtualHost.";
         };
       };
+      resolverLists = lib.mkOption {
+        type = lib.types.listOf lib.types.path;
+        default = [ ];
+        example = lib.literalExpression "[ inputs.dnscrypt-resolvers-official ]";
+        description = "Pinned copies of DNSCrypt's public-resolvers.md. When non-empty, the stamp for each name in serverNames is extracted from these files at build time and written as a `static` server entry, and the runtime `sources.public-resolvers` block is dropped entirely -- dnscrypt-proxy then never fetches a resolver list over the network and keeps no list state under /var/lib. Lists are searched in order, so a second mirror can fill a gap in the first. Evaluation fails if a configured serverName appears in none of them. The tradeoff: a stamp freezes a resolver's address and public key, so a resolver that rotates keys needs these files re-pinned; leave this empty to keep the upstream refresh-and-minisign-verify behaviour.";
+      };
       serverNames =
         let
-          # Pick a low-latency default upstream from the machine's timezone
-          # purely to cut round-trip time; Cloudflare + Google stay as fixed
-          # secondaries. Override this option to pin your own resolvers.
           timezone = if config.time.timeZone or null != null then config.time.timeZone else "UTC";
-          defaultServer =
+          regionalServers =
             if lib.hasPrefix "America/" timezone then
-              "cs-brazil"
+              [ "dnscry.pt-miami-ipv4" ]
             else if lib.hasPrefix "Europe/" timezone then
-              "cs-berlin"
+              [ "cs-berlin" ]
             else
-              "doh-crypto-sx";
+              [ "doh-crypto-sx" ];
         in
         lib.mkOption {
           type = lib.types.listOf lib.types.str;
-          default = [
-            defaultServer
+          default = regionalServers ++ [
             "cloudflare"
             "google"
           ];
@@ -123,6 +132,10 @@ in
         assertion = cfg.dnsmasq.enable -> (cfg.listenPort == 53 || cfg.dnsmasq.runOutsidePort53);
         message = "dnsmasq must run on port 53 unless runOutsidePort53 is explicitly enabled. DNS clients expect port 53 by default.";
       }
+      {
+        assertion = missingStamps == [ ];
+        message = "modules.dnscrypt-proxy.serverNames: no sdns:// stamp for ${lib.concatStringsSep ", " missingStamps} in the pinned resolverLists. Either the name is misspelled or the resolver left the public list -- re-pin the lists, or clear resolverLists to go back to fetching them at runtime.";
+      }
     ];
 
     networking = lib.mkMerge [
@@ -132,8 +145,15 @@ in
         dhcpcd.extraConfig = "nohook resolv.conf";
       }
 
-      (lib.mkIf cfg.openFirewall {
+      (lib.mkIf (cfg.openFirewall && cfg.dnsmasq.bindInterfaces == [ ]) {
         firewall.allowedUDPPorts = [ cfg.listenPort ];
+      })
+
+      (lib.mkIf (cfg.openFirewall && firewallInterfaces != [ ]) {
+        firewall.interfaces = lib.genAttrs firewallInterfaces (_: {
+          allowedUDPPorts = [ cfg.listenPort ];
+          allowedTCPPorts = [ cfg.listenPort ];
+        });
       })
     ];
 
@@ -141,14 +161,7 @@ in
       description = "DNSCrypt-proxy client";
       after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
-      # Restart atomically on switch instead of stop-then-start. If an activation
-      # is interrupted (or the new unit fails to start) between the stop and the
-      # start phases, the box is left with NO :53 listener -- and then it cannot
-      # resolve anything to fetch its own fix.
       stopIfChanged = false;
-      # Regenerate networking.hosts into dnscrypt cloaking rules on every start.
-      # Without this, encrypted upstream resolution bypasses /etc/hosts and your
-      # local host overrides silently stop working.
       preStart = ''
         mkdir -p $RUNTIME_DIRECTORY
         chmod 755 $RUNTIME_DIRECTORY
@@ -202,15 +215,6 @@ in
               "8.8.8.8:53"
               "9.9.9.9:53"
             ];
-            sources.public-resolvers = {
-              urls = [
-                "https://download.dnscrypt.info/resolvers-list/v3/public-resolvers.md"
-                "https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md"
-              ];
-              cache_file = "/var/lib/private/dnscrypt-proxy/public-resolvers.md";
-              minisign_key = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
-              refresh_delay = 72;
-            };
             require_dnssec = false;
             cache = cfg.dnscryptCache;
             cloak_ttl = 60;
@@ -218,6 +222,27 @@ in
             cloaking_rules = "/var/lib/private/dnscrypt-proxy/cloaking-rules.txt";
             server_names = cfg.serverNames;
           }
+          // (
+            if pinResolvers then
+              {
+                static = lib.genAttrs cfg.serverNames (name: {
+                  stamp = knownStamps.${name};
+                });
+                sources = { };
+              }
+            else
+              {
+                sources.public-resolvers = {
+                  urls = [
+                    "https://download.dnscrypt.info/resolvers-list/v3/public-resolvers.md"
+                    "https://raw.githubusercontent.com/DNSCrypt/dnscrypt-resolvers/master/v3/public-resolvers.md"
+                  ];
+                  cache_file = "/var/lib/private/dnscrypt-proxy/public-resolvers.md";
+                  minisign_key = "RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
+                  refresh_delay = 72;
+                };
+              }
+          )
           // (
             if cfg.queryLog.enable then
               {
@@ -240,9 +265,6 @@ in
         "dnscrypt-proxy.service"
         "network-online.target"
       ];
-      # Same no-:53-listener guard as dnscrypt-proxy: never stop-then-start on
-      # switch. And when only the hosts entries change, reload (SIGHUP re-reads
-      # /etc/hosts) instead of bouncing the unit that owns port 53.
       stopIfChanged = false;
       reloadTriggers = [ config.environment.etc.hosts.source ];
       serviceConfig = {

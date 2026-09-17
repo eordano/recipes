@@ -6,7 +6,6 @@
     let
       inherit (nixpkgs) lib;
 
-      # Each recipe dir with a default.nix becomes a named output.
       dirsWith =
         base:
         builtins.attrNames (
@@ -23,8 +22,18 @@
         );
 
       pkgDirs = dirsWith "packages";
-      # An overlay that makes every packages/<name> available as pkgs.<name>
-      # (callPackage-style derivations). Recipe dir name = package attr name.
+      callablePkgDirs =
+        pkgs:
+        lib.filter (
+          n:
+          lib.all (arg: pkgs ? ${arg}) (
+            lib.attrNames (
+              lib.filterAttrs (_: hasDefault: !hasDefault) (
+                lib.functionArgs (import (self + "/packages/${n}/default.nix"))
+              )
+            )
+          )
+        ) pkgDirs;
       packagesOverlay =
         final: _prev:
         builtins.listToAttrs (
@@ -71,21 +80,15 @@
       );
     in
     {
-      # NixOS modules + behaviors, importable as nixosModules.<name>
       nixosModules = namedFrom "modules" // namedFrom "behaviors";
 
-      # Package-set overlays, composable as overlays.<name>. `overlays.default`
-      # composes every recipe overlay + the recipe packages; `overlays.packages`
-      # adds just the packages.
       overlays = overlaysByName // {
         packages = packagesOverlay;
         default = lib.composeManyExtensions (builtins.attrValues overlaysByName ++ [ packagesOverlay ]);
       };
 
-      # Small reusable Nix functions/values, as lib.<name> (import lazily).
       lib = namedFrom "lib";
 
-      # Buildable derivations, per system: packages.<system>.<name>.
       packages = forAllSystems (
         system:
         let
@@ -95,15 +98,10 @@
           map (n: {
             name = n;
             value = pkgs.callPackage (self + "/packages/${n}/default.nix") { };
-          }) pkgDirs
+          }) (callablePkgDirs pkgs)
         )
       );
 
-      # checks.<system>.<recipe> runs that recipe's own test*.nix. A test sits
-      # beside the default.nix it covers and imports it as `./default.nix`, so
-      # the module under test is byte-for-byte the one nixosModules.<recipe>
-      # exports -- there is no second copy to drift. `same-file-as-module`
-      # below is what keeps that true.
       checks = lib.genAttrs linuxSystems (
         system:
         let

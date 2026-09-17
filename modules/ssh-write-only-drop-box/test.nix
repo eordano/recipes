@@ -1,56 +1,3 @@
-# NixOS VM test for the ssh-write-only-drop-box module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from a flake:
-#
-#   pkgs.callPackage ./modules/ssh-write-only-drop-box/test.nix { }
-#
-# The module's security claim is a PAIRING: a forced command in every
-# authorized_keys line AND a `Match User` block that sets `ForceCommand` and
-# narrows `AuthorizedKeysFile`. Half of that is not a weaker version of the
-# whole, it is no enforcement at all -- so this test carries a NEGATIVE CONTROL
-# node, `unpaired`: the half implementation, carrying the module's own
-# `command="...",restrict` lines (lifted from a real evaluation of the recipe)
-# and no `Match` block. Every "the paired server refuses X" assertion is
-# followed by "and the unpaired one does X", which is what makes the first
-# assertion non-vacuous: a test that only says "ssh failed" is equally
-# satisfied by a typo in a hostname.
-#
-# What it proves:
-#
-#    1. topology sanity -- no framework-assigned 192.168.* addresses anywhere,
-#       one address per topology interface (see lib/nixos-test-topology).
-#    2. a client holding a push key CAN rsync a directory in, and the drop is
-#       PROMOTED into published/ once its sentinel lands.
-#    3. that same client cannot LIST the drop-box.
-#    4. ...cannot READ anything back (rsync pull, and scp of an absolute path).
-#    5. ...cannot OVERWRITE a file it already wrote (allowOverwrite = false:
-#       the push reports success and changes nothing).
-#    6. ...cannot DELETE (allowDelete = false).
-#    7. ...cannot run an arbitrary command, and cannot get an interactive shell.
-#    8. PAIRING: an unrestricted key that reaches the managed authorized_keys
-#       file -- no `command=`, no `restrict` -- still gets no command and no
-#       forwarding, because `ForceCommand` overrides `command=` and
-#       `DisableForwarding` overrides the missing `restrict`. The same key on
-#       `unpaired` gets a full shell and a working TCP forward.
-#    9. PAIRING: a key planted in the push user's own
-#       `~/.ssh/authorized_keys` does not authenticate at all, because the
-#       `Match` block narrows `AuthorizedKeysFile`. The same planted key
-#       authenticates on `unpaired`.
-#   10. PAIRING: the `Match` block is emitted LAST in sshd_config (mkOrder
-#       2000), so it cannot swallow a global directive appended after it.
-#   11. the rsync "no atomic done signal" trap: a drop whose sentinel never
-#       arrives is never promoted, and is QUARANTINED with a machine-readable
-#       reason once the deadline passes.
-#   12. a malicious drop id is REJECTED rather than used as a path component:
-#         a. `..` in the remote path is refused by the transport;
-#         b. an absolute remote path is confined to the chroot, not honoured;
-#         c. a leading-dot id is quarantined under a digest of its name;
-#         d. a hand-started worker with `/` or a leading dot in its instance
-#            name touches nothing at all.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
@@ -68,11 +15,7 @@ let
   pushUser = "dropbox";
   doneTimeout = 60;
 
-  # Throwaway keypairs generated for this test and nothing else. They are
-  # public the moment this file is. Never reuse them for anything.
   keys = {
-    # Legitimate CI push key: listed in `pushKeys`, so the module writes it
-    # with `command="...",restrict`.
     push = {
       public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFmGRl5D+bPVGyWXbwT3ZJyjc2uOcqpRZrxRo7FsVZ6H drop-box-test-push";
       private = ''
@@ -85,10 +28,6 @@ let
         -----END OPENSSH PRIVATE KEY-----
       '';
     };
-    # An unrestricted key that reaches the SAME managed file the module writes
-    # -- the shape a second module, an admin, or a compromised deploy leaves
-    # behind. It has no `command=` and no `restrict`, so on its own it is a
-    # shell. Only the `Match` block stops it.
     attacker = {
       public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILnMTAmncy0sgtf198qU/nAwPmQ1TbiwGnezWzMxdNKI drop-box-test-attacker";
       private = ''
@@ -101,9 +40,6 @@ let
         -----END OPENSSH PRIVATE KEY-----
       '';
     };
-    # Planted at runtime into the push user's own ~/.ssh/authorized_keys,
-    # which is inside dataDir and therefore writable by anything that already
-    # got a foothold as that user.
     planted = {
       public = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAK8cxbx+3bvBng4oog+Yaev2Ig9N7la/+TIxwTd4jbB drop-box-test-planted";
       private = ''
@@ -132,11 +68,6 @@ let
   receiver = {
     imports = [ ./default.nix ];
     services.openssh.enable = true;
-    # Pinned, not defaulted. Subtest 9 is only meaningful if the GLOBAL
-    # AuthorizedKeysFile would otherwise read the push user's home -- that is
-    # nixpkgs' default today (sshd.nix: `authorizedKeysInHomedir` default
-    # true), and if it ever flips the subtest would silently start proving
-    # nothing. The runtime assertion re-checks it in the generated config.
     services.openssh.authorizedKeysInHomedir = true;
     services.sshDropBox = dropBoxSettings;
     users.users.${pushUser}.openssh.authorizedKeys.keys = [ keys.attacker.public ];
@@ -144,11 +75,6 @@ let
     system.stateVersion = "25.05";
   };
 
-  # A plain, non-VM evaluation of the recipe, used only to lift the module's
-  # OWN generated authorized_keys lines into the negative-control node. Taking
-  # them from a real evaluation rather than re-typing them is what keeps the
-  # control honest: the control differs from `server` in exactly one thing,
-  # the absence of the `Match` block.
   recipeEval =
     (import (pkgs.path + "/nixos/lib/eval-config.nix") {
       system = pkgs.stdenv.hostPlatform.system;
@@ -191,9 +117,6 @@ pkgs.testers.runNixOSTest {
         networking.firewall.enable = false;
         system.stateVersion = "25.05";
 
-        # The client half of the recipe, taken straight off the module's
-        # read-only `clientPackage` option -- the drop-box itself is not
-        # enabled here, this host only pushes.
         environment.systemPackages = [
           config.services.sshDropBox.clientPackage
           pkgs.rsync
@@ -207,7 +130,6 @@ pkgs.testers.runNixOSTest {
         };
       };
 
-    # The module as an adopter deploys it: forced command AND Match block.
     server = { ... }: {
       imports = [
         topo.nodes.server
@@ -215,19 +137,6 @@ pkgs.testers.runNixOSTest {
       ];
     };
 
-    # NEGATIVE CONTROL -- the HALF IMPLEMENTATION. Same push user, same shell,
-    # the module's own `command="...",restrict` lines, the same extra
-    # unrestricted key -- and no `Match` block. Nothing here should ever be
-    # deployed; it exists so the paired node's refusals can be attributed to
-    # the pairing rather than to an unrelated failure.
-    #
-    # It deliberately does NOT import the recipe. `lib.mkForce ""` on
-    # `services.openssh.extraConfig` looks like the way to strip just the
-    # Match block, and is not: nixpkgs emits `AuthorizedKeysFile`, `HostKey`,
-    # `Port` and `Subsystem sftp` through that same option at `mkOrder 0`
-    # (sshd.nix), so forcing it empty breaks authentication outright and the
-    # control would "prove" the bypass is impossible for entirely the wrong
-    # reason.
     unpaired =
       { pkgs, ... }:
       {

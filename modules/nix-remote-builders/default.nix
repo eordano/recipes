@@ -20,17 +20,10 @@ let
 
   routeNames = if excluded then [ ] else cfg.routes.${thisHost} or cfg.defaultRoute;
 
-  # A route may name a builder that is not in the table on this evaluation --
-  # tables are commonly assembled from an address book and an entry drops out
-  # when its address is unknown. Filtering keeps that a degradation rather than
-  # an eval error; set `strictRoutes` to turn it back into an assertion.
   unknownNames = builtins.filter (n: !(cfg.builders ? ${n})) routeNames;
   selectedNames = builtins.filter (n: cfg.builders ? ${n}) routeNames;
   selected = map (n: cfg.builders.${n}) selectedNames;
 
-  # Several builders legitimately share one keypair. Any consumer that is
-  # list-shaped rather than attrset-shaped turns the duplicate into a
-  # definition conflict, so the invariant is enforced at the boundary.
   keyNames = lib.unique (map (b: b.keyName) (builtins.filter (b: b.keyName != null) selected));
 
   identityOf =
@@ -42,9 +35,6 @@ let
     else
       null;
 
-  # ssh_config is FIRST-MATCH-WINS per keyword. These blocks are emitted with
-  # mkBefore so they land ahead of any `Host *` that enables multiplexing --
-  # see the README, that ordering is the entire defence.
   sshBlock =
     b:
     let
@@ -416,13 +406,6 @@ in
       };
     };
 
-    # These only take effect if you ALSO import ./agenix.nix, which is a
-    # separate file on purpose: a module may not conditionally define an
-    # option path that might not exist. `mkIf false { age.secrets = ...; }` does
-    # NOT hide the name -- the module system pushes the mkIf down into each
-    # attribute first, registers `age` as a defined path, and then fails with
-    # "The option `age' does not exist" on any host without agenix. See the
-    # README.
     agenix = {
       enable = mkEnableOption ''
         resolving each builder's IdentityFile from
@@ -621,11 +604,6 @@ in
         }) selected;
       }
 
-      # mkBefore is load-bearing, not stylistic: ssh_config takes the FIRST
-      # value it obtains for each keyword, and nixpkgs appends its own
-      # `Host *` section AFTER programs.ssh.extraConfig
-      # (nixos/modules/programs/ssh.nix). Emitting builder blocks first is
-      # what makes `ControlMaster no` reachable at all.
       (mkIf cfg.ssh.manageClientConfig {
         programs.ssh.extraConfig = lib.mkBefore (lib.concatMapStrings sshBlock selected);
       })

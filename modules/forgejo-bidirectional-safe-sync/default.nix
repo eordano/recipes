@@ -1,21 +1,3 @@
-# forgejo-bidirectional-safe-sync
-#
-# A NixOS module that bidirectionally mirrors two Forgejo instances from a
-# neutral third box. Each timer tick walks every repo on both sides via the
-# Forgejo API and reconciles refs *symmetrically*:
-#
-#   - fast-forward a ref wherever it is safe (one side strictly ahead),
-#   - propagate brand-new repos/refs,
-#   - and ALERT on genuine divergence instead of force-pushing over either side.
-#
-# Because the sync runs on a third host, neither forge depends on the other for
-# backup / HA: if one goes down, the survivor keeps its full copy and the box
-# reconciles once the peer returns.
-#
-# This module is only the packaging (system user, secret plumbing, timer +
-# hardened oneshot service). The actual reconciliation engine is an external
-# script you point `syncScript` at; the env-var contract it must consume is
-# documented in the README and materialized by `envSetup` below.
 {
   config,
   lib,
@@ -25,16 +7,9 @@
 let
   cfg = config.services.forgejo-bisync;
 
-  # Runtime dir lives on tmpfs (/run) -- see the EnvironmentFile trap below.
   runDir = "/run/${cfg.user}";
   envFile = "${runDir}/env";
 
-  # Runs as cfg.user, not root: RuntimeDirectory already creates ${runDir}
-  # owned by that user, and the secret is read through LoadCredential, which
-  # lets systemd's PID1 (still root) read passwordFile on the unit's behalf
-  # and hand it over via $CREDENTIALS_DIRECTORY -- so this works regardless of
-  # whether passwordFile is readable by anyone but root, and nothing here
-  # needs the `+` root-prefix it used to.
   envSetup = pkgs.writeShellScript "forgejo-bisync-env" ''
     set -eu
     PW=$(cat "$CREDENTIALS_DIRECTORY/password")
@@ -228,9 +203,6 @@ in
         Type = "oneshot";
         User = cfg.user;
         Group = cfg.user;
-        # RuntimeDirectory replaces the manual `install -d -o -g` that used to
-        # need root; LoadCredential replaces the root-only `cat` of
-        # passwordFile. Neither ExecStartPre nor ExecStart runs privileged.
         RuntimeDirectory = cfg.user;
         RuntimeDirectoryMode = "0750";
         LoadCredential = "password:${cfg.passwordFile}";
@@ -238,12 +210,6 @@ in
         ExecStart = lib.concatStringsSep " " (
           (lib.optionals (cfg.interpreter != null) cfg.interpreter) ++ [ (toString cfg.syncScript) ]
         );
-        # NOTE the leading `-`: optional-load. /run is tmpfs, so on the first
-        # cycle after boot the env file does not exist yet, and systemd loads
-        # EnvironmentFile BEFORE running ExecStartPre (which creates it).
-        # Without the `-`, the unit dies with "Failed to load environment files"
-        # before envSetup can run -- a permanent boot-time loop. The `-` lets the
-        # first load no-op; envSetup then writes the file for ExecStart to read.
         EnvironmentFile = "-${envFile}";
         WorkingDirectory = cfg.workDir;
 
@@ -265,8 +231,6 @@ in
           "~@privileged"
           "~@resources"
         ];
-        # Transient network/API failures are expected and fine: no Restart, the
-        # next timer tick retries. A stale ref survives at most one interval.
         Restart = "no";
       };
     };

@@ -1,24 +1,3 @@
-# pip-mirror-client -- point every host's pip at an internal PyPI mirror.
-#
-# Writes a system-wide /etc/pip.conf so that *every* invocation of pip on the
-# host (any user, any venv that doesn't override it) fetches packages from an
-# internal mirror instead of the public PyPI. This cuts WAN traffic and keeps
-# `pip install` working when the public index is slow or unreachable.
-#
-# SECURITY: the `trusted-host` line tells pip to SKIP TLS certificate
-# verification for that host, system-wide. It is only needed when the mirror
-# terminates TLS with a certificate pip does not trust by default (a private
-# CA, a self-signed cert) or serves plain HTTP. If your mirror has a valid,
-# publicly/corporate-trusted certificate, leave `trustedHost` unset ("") so
-# full TLS verification stays on. Setting it weakens security and should be a
-# deliberate choice, not a default.
-#
-# Usage:
-#   imports = [ ./pip-mirror-client ];
-#   behaviors.pip-mirror.enable    = true;
-#   behaviors.pip-mirror.mirrorUrl = "https://pypi.example.com/index/";
-#   # Only for a self-signed / private-CA / plain-HTTP mirror:
-#   # behaviors.pip-mirror.trustedHost = "pypi.example.com";
 {
   config,
   lib,

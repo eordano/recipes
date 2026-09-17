@@ -82,11 +82,30 @@ your timezone plus Cloudflare/Google as fallbacks, and cloaking rules wired to
 | `nginx.enableACME` | `true` | Get the vhost cert via `security.acme`. |
 | `queryLog.enable` + `queryLog.file` | `false` | Log queries (TSV). |
 | `openFirewall` | `false` | Open `listenPort/udp` (only if serving other hosts). |
+| `resolverLists` | `[]` | Pinned `public-resolvers.md` copies; set to stop fetching the list at runtime. |
 
 The default `serverNames` picks a nearby upstream by `config.time.timeZone`
 (`America/*`, `Europe/*`, else a global fallback) purely to cut latency, with
 Cloudflare and Google as fixed secondaries. Override it to pin your own
-resolvers.
+resolvers. The list carries no South American node, so `America/*` uses
+`dnscry.pt-miami-ipv4` as the nearest one that exists.
+
+### Pinning the resolver list
+
+By default dnscrypt-proxy downloads `public-resolvers.md` every 72h, verifies it
+with minisign, and caches it under `/var/lib`. Point `resolverLists` at one or
+more pinned copies of that file instead and the module extracts the `sdns://`
+stamp for each name in `serverNames` at build time, emitting `static` server
+entries and dropping the `sources` block entirely:
+
+```nix
+modules.dnscrypt-proxy.resolverLists = [ inputs.dnscrypt-resolvers-official ];
+```
+
+No network fetch, no list state on disk, and the resolvers change only when you
+update the pin. A stamp encodes the resolver's address and public key, so a
+resolver that rotates keys needs a re-pin; a name that is in `serverNames` but in
+none of the lists is an evaluation error rather than a silent runtime fallback.
 
 ## Caveats
 

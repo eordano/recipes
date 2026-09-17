@@ -1,40 +1,3 @@
-# push-observability-receiver
-#
-# The RECEIVER half of a push-based observability stack. Remote hosts PUSH
-# their journald logs and node metrics to this box over the Vector protocol
-# (no scrape/pull of the agents). Vector fans logs and metrics into whichever
-# pair of databases `backend` picks -- Loki + Prometheus (default) or
-# VictoriaLogs + VictoriaMetrics; Grafana reads both; nginx terminates TLS.
-#
-# Everything ABOVE the database is identical across the two backends: the
-# Grafana datasource uids stay "loki" and "prometheus", so dashboards and alert
-# rules port over without uid churn, and PromQL is unchanged (VictoriaMetrics
-# serves it at /prometheus). What does NOT port is the log dialect --
-# VictoriaLogs exposes no Loki-compatible query API at all, so every LogQL
-# expression has to be rewritten as LogsQL by whoever supplies the dashboards.
-#
-# The interesting part is everything Grafana CANNOT express through file
-# provisioning, bolted on as oneshots ordered off grafana.service:
-#   * admin password synced from a secret file, guarded by a sha256 flag-file
-#     so it only re-runs when the secret actually changes;
-#   * the home dashboard pinned by writing the DB `preferences` row directly;
-#   * the Grafana secret_key generated once and pinned;
-#   * a playlist provisioned over the HTTP API.
-# Each of those polls for grafana.db / /api/health first, because Grafana
-# creates them LAZILY on first start -- the files simply do not exist until
-# grafana has come up once.
-#
-# Self-referential Loki "context canceled" query-cancel spam is dropped twice
-# (once in Vector, once via the unit's LogFilterPatterns) so the pipeline does
-# not log about itself; both drops exist only under the loki-prometheus
-# backend, since VictoriaLogs does not produce that chatter. GeoIP enrichment
-# skips RFC1918 / CGNAT / loopback so only real external IPs hit the lookup.
-#
-# This file is deliberately self-contained: no external module imports, no
-# secrets-management framework assumed. Point `adminPasswordFile` at a file
-# produced by whatever secret system you use (agenix, sops-nix, a tmpfiles
-# rule, ...). Dashboards and alert rules are yours to supply.
-
 {
   config,
   lib,
@@ -76,14 +39,11 @@ let
   useVictoria = cfg.backend == "victoria";
   useLoki = !useVictoria;
 
-  # Under victoria there is no Loki to filter self-chatter out of, so
-  # process_logs takes this box's journal straight from the source.
   journalStage = if useVictoria then "central_journal" else "drop_loki_query_cancel_noise";
 
   logsUnit = if useVictoria then "victorialogs.service" else "loki.service";
   metricsUnit = if useVictoria then "victoriametrics.service" else "prometheus.service";
 
-  # Neither Victoria binary accepts DEBUG for -loggerLevel.
   victoriaLogLevel =
     {
       debug = "INFO";
@@ -93,18 +53,51 @@ let
     }
     .${cfg.logLevel};
 
-  # Both upstream Victoria modules run DynamicUser + StateDirectory, which
-  # parks the databases in /var/lib/private under a uid that is not stable by
-  # contract. dataDir is the path the adopter put on persistent storage, so
-  # pin the service user and relocate the data there -- a repeated
-  # -storageDataPath takes the LAST value, which is what the extraOptions
-  # override below relies on.
   victoriaStorage = {
     DynamicUser = mkForce false;
     User = cfg.user;
     Group = cfg.user;
     StateDirectory = mkForce "";
     ReadWritePaths = [ cfg.dataDir ];
+  };
+
+  grafanaOneshotServiceConfig = {
+    Type = "oneshot";
+    RemainAfterExit = true;
+    User = "grafana";
+    Group = "grafana";
+  };
+
+  curlPath = [
+    pkgs.curl
+    pkgs.coreutils
+  ];
+
+  waitForGrafanaHealth = ''
+    for i in $(seq 1 60); do
+      if curl -fsS -o /dev/null "$BASE/api/health"; then break; fi
+      sleep 2
+    done
+  '';
+
+  lokiPushLabels = {
+    host = "{{labels.host}}";
+    unit = "{{labels.unit}}";
+    source = "{{labels.source}}";
+    vhost = "{{labels.vhost}}";
+    country = "{{labels.country}}";
+    severity = "{{labels.severity}}";
+    udm_kind = "{{labels.udm_kind}}";
+  };
+
+  nodeScrapeJob = {
+    job_name = "node";
+    static_configs = [
+      {
+        targets = [ "localhost:${toString cfg.nodeExporterPort}" ];
+        labels.host = config.networking.hostName;
+      }
+    ];
   };
 in
 {
@@ -531,10 +524,6 @@ in
         }
       ];
 
-      # Fronting Grafana with nginx while leaving adminPasswordFile unset serves
-      # the login on cfg.domain with Grafana's well-known admin/admin default
-      # until it is changed by hand -- a full dashboard/datasource takeover if a
-      # bot reaches it first. Warn loudly so an adopter can't do this silently.
       warnings = optional (cfg.enableNginx && cfg.adminPasswordFile == null) ''
         services.push-observability-receiver: Grafana is exposed via nginx on
         ${cfg.domain} but adminPasswordFile is unset, so the login keeps
@@ -571,22 +560,11 @@ in
         "d ${cfg.dataDir}/grafana/plugins 0755 grafana grafana - -"
       ];
 
-      # --- Grafana secret_key: generate once, pin it -----------------------
-      # Grafana derives at-rest encryption from secret_key. Generate a stable
-      # one before grafana starts (default is a shipped constant).
       systemd.services.grafana-secret-key = {
         description = "Generate Grafana secret key";
         wantedBy = [ "grafana.service" ];
         before = [ "grafana.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          # dataDir/grafana is already tmpfiles-owned grafana:grafana, so a file
-          # this unit creates there is already correctly owned -- no root/chown
-          # needed, matching the sibling grafana-admin-password-reset unit below.
-          User = "grafana";
-          Group = "grafana";
-        };
+        serviceConfig = grafanaOneshotServiceConfig;
         script = ''
           KEY_FILE="${cfg.dataDir}/grafana/secret_key"
           if [ ! -f "$KEY_FILE" ]; then
@@ -596,23 +574,11 @@ in
         '';
       };
 
-      # --- Pin the home dashboard by writing the DB row --------------------
-      # Grafana can't set the org home dashboard via file provisioning, so we
-      # write the `preferences` row directly. grafana.db is created LAZILY on
-      # first start, so poll for it first, then retry the write under a busy
-      # timeout (grafana may hold the sqlite lock at boot).
       systemd.services.grafana-home-preference = mkIf (cfg.homeDashboardUid != null) {
         description = "Pin the Grafana home dashboard";
         after = [ "grafana.service" ];
         wantedBy = [ "grafana.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          # grafana.db lives under dataDir/grafana, already owned by grafana:grafana
-          # (tmpfiles rule above), so the sqlite write needs no elevated privilege.
-          User = "grafana";
-          Group = "grafana";
-        };
+        serviceConfig = grafanaOneshotServiceConfig;
         script =
           let
             sql = pkgs.writeText "grafana-home-pref.sql" ''
@@ -642,47 +608,22 @@ in
           '';
       };
 
-      # --- Sync admin password from a secret file (idempotent) -------------
-      # Reset only when the secret's sha256 differs from the last applied hash
-      # (recorded in a flag file). Without the guard this would reset the
-      # password on every activation, fighting any UI-side change and churning
-      # the DB. Polls /api/health, NOT merely for grafana.db to exist: grafana
-      # is Type=simple, so systemd reports it started ~40ms in while its
-      # migrator still has ~10s of schema work left. `grafana cli` runs its own
-      # migrator against the same sqlite file, and on a COLD database the two
-      # interleave and corrupt the schema (duplicate index, then a missing
-      # provisioning column), after which grafana crash-loops to start-limit-hit
-      # and never recovers. /api/health only answers once migration is done.
       systemd.services.grafana-admin-password-reset = mkIf haveAdminPw {
         description = "Sync Grafana admin password from a secret file";
         after = [ "grafana.service" ];
         requires = [ "grafana.service" ];
         wantedBy = [ "grafana.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          User = "grafana";
-          Group = "grafana";
-          # PID1 (root) reads the secret and hands it over at
-          # $CREDENTIALS_DIRECTORY/admin-pw, so the file itself never has to be
-          # readable by the service user. Same idiom as grafana-playlist below.
+        serviceConfig = grafanaOneshotServiceConfig // {
           LoadCredential = "admin-pw:${cfg.adminPasswordFile}";
         };
-        path = [
-          pkgs.curl
-          pkgs.coreutils
-        ];
+        path = curlPath;
         script = ''
           set -euo pipefail
           SECRET="$CREDENTIALS_DIRECTORY/admin-pw"
           FLAG="${cfg.dataDir}/grafana/.admin-pw-secret-hash"
 
           BASE="http://127.0.0.1:${toString cfg.grafanaPort}"
-          for i in $(seq 1 60); do
-            if curl -fsS -o /dev/null "$BASE/api/health"; then break; fi
-            sleep 2
-          done
-
+          ${waitForGrafanaHealth}
           WANT=$(sha256sum "$SECRET" | cut -d' ' -f1)
           HAVE=""
           [ -f "$FLAG" ] && HAVE=$(cat "$FLAG")
@@ -700,11 +641,6 @@ in
         '';
       };
 
-      # --- Provision a playlist over the HTTP API --------------------------
-      # Playlists aren't file-provisionable, so POST/PUT over the API. Needs the
-      # admin password (hence gated on adminPasswordFile) and a healthy Grafana,
-      # so poll /api/health first. Probe the playlist by uid to decide create
-      # vs update -- the API has no idempotent upsert.
       systemd.services.grafana-playlist = mkIf (havePlaylist && haveAdminPw) {
         description = "Provision the rotation playlist via Grafana API";
         after = [
@@ -716,27 +652,16 @@ in
           "grafana-admin-password-reset.service"
         ];
         wantedBy = [ "grafana.service" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          User = "grafana";
-          Group = "grafana";
+        serviceConfig = grafanaOneshotServiceConfig // {
           LoadCredential = "admin-pw:${cfg.adminPasswordFile}";
         };
-        path = [
-          pkgs.curl
-          pkgs.coreutils
-        ];
+        path = curlPath;
         script = ''
           set -euo pipefail
           BASE="http://127.0.0.1:${toString cfg.grafanaPort}"
           ADMIN_PW=$(cat "$CREDENTIALS_DIRECTORY/admin-pw")
 
-          for i in $(seq 1 60); do
-            if curl -fsS -o /dev/null "$BASE/api/health"; then break; fi
-            sleep 2
-          done
-
+          ${waitForGrafanaHealth}
           auth=(--silent --show-error -u "admin:$ADMIN_PW")
 
           code=$(curl "''${auth[@]}" -o /dev/null -w '%{http_code}' \
@@ -763,7 +688,6 @@ in
         '';
       };
 
-      # --- Vector: the push ingest + fan-out -------------------------------
       services.vector = {
         enable = true;
         package = mkDefault pkgs.vector;
@@ -782,7 +706,6 @@ in
               };
             };
 
-            # Remote hosts PUSH here over the vector protocol -- no scrape.
             sources.agent_logs = {
               type = "vector";
               address = "${cfg.listenAddress}:${toString cfg.vectorPort}";
@@ -797,7 +720,6 @@ in
               acknowledgements.enabled = false;
             };
 
-            # This box's own journal, minus vector itself (avoid self-feedback).
             sources.central_journal = {
               type = "journald";
               current_boot_only = true;
@@ -964,8 +886,6 @@ in
 
           }
           (mkIf useLoki {
-            # Drop Loki's own query-cancel spam in the pipeline (belt); the
-            # unit's LogFilterPatterns below is the suspenders.
             transforms.drop_loki_query_cancel_noise = {
               type = "filter";
               inputs = [ "central_journal" ];
@@ -984,19 +904,8 @@ in
               inputs = [ "process_logs" ];
               endpoint = "http://127.0.0.1:${toString cfg.lokiPort}";
               encoding.codec = "json";
-              # Vector 0.57 rejects label templates that are bare event-field
-              # references (`{{labels.host}}`) with no static prefix; these are
-              # Loki labels, not file paths, so opt out of the confinement check.
               dangerously_allow_unconfined_template_resolution = true;
-              labels = {
-                host = "{{labels.host}}";
-                unit = "{{labels.unit}}";
-                source = "{{labels.source}}";
-                vhost = "{{labels.vhost}}";
-                country = "{{labels.country}}";
-                severity = "{{labels.severity}}";
-                udm_kind = "{{labels.udm_kind}}";
-              };
+              labels = lokiPushLabels;
               remove_label_fields = true;
             };
 
@@ -1013,12 +922,6 @@ in
             };
           })
           (mkIf useVictoria {
-            # VictoriaLogs speaks the Loki PUSH protocol, but only under
-            # /insert, and the query string does NOT survive being written into
-            # `endpoint` -- vector's loki sink drops it and every batch comes
-            # back 400. `path` is the only place it takes effect. Without
-            # ?_msg_field=message the json codec's object lands with _msg set to
-            # VictoriaLogs' "missing _msg field" placeholder.
             sinks.victorialogs = {
               type = "loki";
               inputs = [ "process_logs" ];
@@ -1026,18 +929,8 @@ in
               path = "/insert/loki/api/v1/push?_msg_field=message";
               encoding.codec = "json";
               dangerously_allow_unconfined_template_resolution = true;
-              labels = {
-                host = "{{labels.host}}";
-                unit = "{{labels.unit}}";
-                source = "{{labels.source}}";
-                vhost = "{{labels.vhost}}";
-                country = "{{labels.country}}";
-                severity = "{{labels.severity}}";
-                udm_kind = "{{labels.udm_kind}}";
-              };
+              labels = lokiPushLabels;
               remove_label_fields = true;
-              # The loki sink's healthcheck ignores `path` and probes
-              # endpoint + /ready, which VictoriaLogs answers with a 400.
               healthcheck.enabled = false;
             };
 
@@ -1171,7 +1064,6 @@ in
       };
 
       systemd.services.grafana.serviceConfig = {
-        # dataDir lives on persistent storage, not a StateDirectory.
         StateDirectory = mkForce "";
       }
       // optionalAttrs (cfg.smtp.enabled && cfg.smtp.passwordFile != null) {
@@ -1183,11 +1075,6 @@ in
         dataDir = "${cfg.dataDir}/grafana";
         declarativePlugins = mkIf useVictoria [ pkgs.grafanaPlugins.victoriametrics-logs-datasource ];
         provision = {
-          # The datasource NAMES and UIDs are deliberately the same under both
-          # backends. Grafana's provisioner matches datasources by name, so a
-          # rename would need deleteDatasources to dodge a uid collision -- and
-          # then rolling the backend back would collide in reverse. Only `type`
-          # and `url` move.
           datasources.settings.datasources = [
             {
               name = "Loki";
@@ -1228,9 +1115,6 @@ in
             ];
           };
         }
-        # `provision.alerting` is a submodule, not a nullable option: assigning it
-        # `mkIf false null` still surfaces the null and fails type-checking. Omit
-        # the key entirely when no alerting config is supplied.
         // optionalAttrs (cfg.alerting != null) {
           inherit (cfg) alerting;
         };
@@ -1284,9 +1168,7 @@ in
         ++ optional cfg.enableNginx 443;
     }
 
-    # --- backend: Loki + Prometheus --------------------------------------
     (mkIf useLoki {
-      # Loki: single-binary filesystem store.
       services.loki = {
         enable = true;
         package = pkgs.grafana-loki;
@@ -1332,7 +1214,6 @@ in
         };
       };
 
-      # Suspenders for Loki's self-referential query-cancel chatter.
       systemd.services.loki.serviceConfig.LogFilterPatterns = [
         "~msg=\"error processing requests from scheduler\""
         "~msg=\"error fetching chunks\" err=\"context canceled\""
@@ -1357,34 +1238,20 @@ in
                 { targets = [ "localhost:${toString cfg.prometheusPort}" ]; }
               ];
             }
-            {
-              job_name = "node";
-              static_configs = [
-                {
-                  targets = [ "localhost:${toString cfg.nodeExporterPort}" ];
-                  labels.host = config.networking.hostName;
-                }
-              ];
-            }
+            nodeScrapeJob
           ]
           ++ cfg.extraScrapeJobs;
-          # Pushed metrics can arrive slightly out of order across agents.
           storage.tsdb.out_of_order_time_window = "10m";
         };
 
-        # Accept Vector's remote-write.
         extraFlags = [ "--web.enable-remote-write-receiver" ];
       };
     })
 
-    # --- backend: VictoriaLogs + VictoriaMetrics -------------------------
     (mkIf useVictoria {
       services.victorialogs = {
         enable = true;
         listenAddress = "127.0.0.1:${toString cfg.victoriaLogsPort}";
-        # The module has no retention option, and its -storageDataPath is
-        # hardcoded to /var/lib/<stateDir>; both are settled here because a
-        # repeated flag takes the last value.
         extraOptions = [
           "-storageDataPath=${cfg.dataDir}/victorialogs"
           "-retentionPeriod=${cfg.retentionPeriod}"
@@ -1400,10 +1267,6 @@ in
           "-storageDataPath=${cfg.dataDir}/victoriametrics"
           "-loggerLevel=${victoriaLogLevel}"
         ];
-        # VictoriaMetrics accepts remote-write on /api/v1/write with no extra
-        # flag, so promscrape only has to cover what Prometheus scraped: this
-        # box's own databases and its node exporter. `job = "node"` and its
-        # host label are load-bearing for dashboards and alert rules.
         prometheusConfig = {
           global.scrape_interval = "30s";
           scrape_configs = [
@@ -1425,15 +1288,7 @@ in
                 }
               ];
             }
-            {
-              job_name = "node";
-              static_configs = [
-                {
-                  targets = [ "localhost:${toString cfg.nodeExporterPort}" ];
-                  labels.host = config.networking.hostName;
-                }
-              ];
-            }
+            nodeScrapeJob
           ]
           ++ cfg.extraScrapeJobs;
         };

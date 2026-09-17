@@ -1,21 +1,3 @@
-# hydra-ci-server
-#
-# Self-host Hydra (the Nix-native CI/CD system) behind nginx with a
-# declaratively-provisioned PostgreSQL backend. This module is written against
-# *upstream* NixOS options only (services.hydra, services.postgresql,
-# services.nginx), so it is a drop-in you can import anywhere.
-#
-# The value here is not the wiring -- it is the five non-obvious traps it takes
-# to make Hydra actually run behind a reverse proxy on a DB you provisioned
-# yourself. Each is called out inline below. See README.md for the "why".
-#
-# Usage:
-#   imports = [ ./hydra-ci-server ];
-#   services.hydra-ci-server = {
-#     enable = true;
-#     domain = "hydra.example.com";
-#   };
-
 {
   config,
   lib,
@@ -34,10 +16,6 @@ let
     optional
     ;
 
-  # Hydra's three fixed system users (created by upstream services.hydra) plus
-  # root (for out-of-band psql), all mapped to the single `dbName` DB role.
-  # These OS user names are fixed by Hydra upstream -- do not rename them.
-  # The third column is the target PG role, so it tracks cfg.dbName.
   identMapName = "hydra";
   identMapLines = lib.concatStringsSep "\n" [
     "${identMapName} hydra               ${cfg.dbName}"
@@ -111,8 +89,6 @@ in
 
     maxOutputSize = mkOption {
       type = types.int;
-      # 8 GiB. Raise for heavy builds (e.g. CUDA/ML closures) that otherwise
-      # trip Hydra's "output limit exceeded".
       default = 8 * 1024 * 1024 * 1024;
       description = "Max size (bytes) of a single build output before Hydra rejects it.";
     };
@@ -138,8 +114,6 @@ in
       buildMachinesFiles = optional (cfg.buildMachinesFile != null) cfg.buildMachinesFile;
       useSubstitutes = true;
 
-      # TRAP 5 (IFD): Hydra evaluates in its own environment; the nix.conf
-      # setting alone does not reach the evaluator, so pass it explicitly.
       extraEnv = mkIf cfg.allowImportFromDerivation {
         NIX_CONFIG = "allow-import-from-derivation = true";
       };
@@ -149,8 +123,6 @@ in
       '';
     };
 
-    # ---- Declarative PostgreSQL backend --------------------------------------
-    # The DB and role are provisioned here, NOT by hydra-init. See TRAP 4.
     services.postgresql = {
       enable = lib.mkDefault true;
 
@@ -162,25 +134,13 @@ in
         }
       ];
 
-      # TRAP 1 (ident map): Hydra runs as three separate system users
-      # (hydra, hydra-queue-runner, hydra-www). Peer auth authenticates by the
-      # OS user name, so without a map only a role literally named
-      # "hydra-queue-runner" etc. could connect. This map lets all three -- plus
-      # root, for manual psql -- connect as the single `${cfg.dbName}` role.
-      # (identMap is a plain string that appends to pg_ident.conf upstream.)
       identMap = identMapLines;
 
-      # Peer-auth rule that activates the map above for local connections as
-      # the hydra role. Appended to pg_hba.conf ahead of the default catch-all.
       authentication = mkBefore ''
         local all ${cfg.dbName} peer map=${identMapName}
       '';
     };
 
-    # TRAP 2 (pg_trgm): Hydra's job/build search relies on trigram indexes.
-    # Without the pg_trgm extension the schema init fails and Hydra will not
-    # start evaluations. Upstream has no per-database setup hook, so create the
-    # extension in a oneshot ordered before hydra-init.
     systemd.services.hydra-pg-trgm = {
       description = "Ensure pg_trgm extension exists in the Hydra database";
       after = [ "postgresql.service" ];
@@ -199,7 +159,6 @@ in
       '';
     };
 
-    # ---- nginx reverse proxy -------------------------------------------------
     services.nginx = {
       enable = lib.mkDefault true;
       virtualHosts.${cfg.domain} = {
@@ -236,12 +195,6 @@ in
       allow-import-from-derivation = cfg.allowImportFromDerivation;
     };
 
-    # TRAP 4 (.db-created sentinel): hydra-init bootstraps its own database on
-    # first run -- creating the role and DB and running its schema. Since we
-    # already provisioned both declaratively above, pre-touch the sentinel it
-    # checks so it skips that bootstrap (which would otherwise try to CREATE a
-    # role/DB that already exist, and fail). mkBefore keeps this ahead of the
-    # upstream preStart body.
     systemd.services.hydra-init.preStart = mkBefore ''
       mkdir -p ${cfg.stateDir}
       touch ${cfg.stateDir}/.db-created

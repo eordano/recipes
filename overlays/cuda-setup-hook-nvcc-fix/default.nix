@@ -1,19 +1,7 @@
 {
   scopes ? [ "cudaPackages" ],
-  # Both halves of this fix landed upstream (setup hook: `type -P nvcc`;
-  # cudnn-frontend/cutlass: `cuda_nvcc` in nativeBuildInputs), so both defaults
-  # are now OFF -- turning either on only appends duplicates and forces a
-  # cache-losing rebuild of setupCudaHook and the ML stack. See the README's
-  # "When to delete" section; on a pre-fix nixpkgs, set these back on.
   nvccNativeBuildInputFor ? [ ],
-  # Attrset of package name -> extra cmakeFlags. Any flag already in the
-  # package's cmakeFlags that sets the same CMake variable is dropped first,
-  # so these win regardless of what nixpkgs set.
   extraCmakeFlagsFor ? { },
-  # Attrset of package name -> shell snippet appended to postInstall. Mainly
-  # for the fallout of extraCmakeFlagsFor: turning a cmake target off can
-  # leave a declared output with nothing to populate it, and nix fails a
-  # build whose declared outputs do not all exist.
   extraPostInstallFor ? { },
   patchSetupHook ? false,
   requireCudaSupport ? true,
@@ -52,8 +40,6 @@ let
     HOOKFIX
   '';
 
-  # "-DFOO:BOOL=TRUE" -> "FOO"; null for anything not of that shape (a
-  # cmakeFlags entry need not be a plain -D string).
   flagVar =
     f:
     if !(builtins.isString f) then

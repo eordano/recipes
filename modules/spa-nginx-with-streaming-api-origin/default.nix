@@ -19,47 +19,44 @@ let
     proxy_set_header X-Accel-Buffering no;
   '';
 
-  upstreamModule = lib.types.submodule (
-    { ... }:
-    {
-      options = {
-        upstream = lib.mkOption {
-          type = lib.types.str;
-          example = "http://127.0.0.1:8080";
-          description = ''
-            Where this API prefix is proxied. A scheme + host + port, as nginx's
-            `proxy_pass` wants it. Use a loopback address for a co-located
-            backend; the point of this recipe is that the browser never sees it.
-          '';
-        };
-        websockets = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = ''
-            Set the `Upgrade`/`Connection` headers so a websocket handshake is
-            proxied through (nginx `proxyWebsockets`). Leave false for plain SSE
-            or chunked long-poll -- those need HTTP/1.1 and buffering off (both
-            applied unconditionally) but NOT the upgrade dance.
-          '';
-        };
-        streaming = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-          description = ''
-            Apply the streaming proxy config (buffering off, long timeouts). On
-            by default: this module exists for streaming origins. Turn it off
-            only for a plain request/response JSON endpoint that shares the vhost
-            and actually benefits from buffering.
-          '';
-        };
-        extraConfig = lib.mkOption {
-          type = lib.types.lines;
-          default = "";
-          description = "Extra nginx directives appended to this location (e.g. an auth header include).";
-        };
+  upstreamModule = lib.types.submodule (_: {
+    options = {
+      upstream = lib.mkOption {
+        type = lib.types.str;
+        example = "http://127.0.0.1:8080";
+        description = ''
+          Where this API prefix is proxied. A scheme + host + port, as nginx's
+          `proxy_pass` wants it. Use a loopback address for a co-located
+          backend; the point of this recipe is that the browser never sees it.
+        '';
       };
-    }
-  );
+      websockets = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Set the `Upgrade`/`Connection` headers so a websocket handshake is
+          proxied through (nginx `proxyWebsockets`). Leave false for plain SSE
+          or chunked long-poll -- those need HTTP/1.1 and buffering off (both
+          applied unconditionally) but NOT the upgrade dance.
+        '';
+      };
+      streaming = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Apply the streaming proxy config (buffering off, long timeouts). On
+          by default: this module exists for streaming origins. Turn it off
+          only for a plain request/response JSON endpoint that shares the vhost
+          and actually benefits from buffering.
+        '';
+      };
+      extraConfig = lib.mkOption {
+        type = lib.types.lines;
+        default = "";
+        description = "Extra nginx directives appended to this location (e.g. an auth header include).";
+      };
+    };
+  });
 
   siteModule = lib.types.submodule (
     { name, ... }:
@@ -168,8 +165,8 @@ let
     in
     lib.recursiveUpdate {
       inherit (site) forceSSL enableACME default;
-      serverName = site.serverName;
-      useACMEHost = site.useACMEHost;
+      inherit (site) serverName;
+      inherit (site) useACMEHost;
       locations = apiLocations // spaLocation;
       extraConfig = ''
         client_max_body_size ${site.clientMaxBodySize};

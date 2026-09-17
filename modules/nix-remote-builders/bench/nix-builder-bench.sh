@@ -1,38 +1,4 @@
 #!/usr/bin/env bash
-#
-# nix-builder-bench -- measure candidate Nix remote builders so that the
-# `speedFactor` you write into nix.buildMachines is a number you can defend.
-#
-# Design constraints (see the recipe README for why each one matters):
-#
-#   * ONE generated program is piped into ONE `bash -s` per host, and that
-#     program `exec`s into ONE `nix shell`. Every benchmark therefore runs
-#     under the identical toolchain with no PATH drift between measurements,
-#     and the nix-shell realisation cost is paid once, outside the timings.
-#   * hyperfine does the timing, with warmup runs discarded, so the first
-#     (cold page cache, cold nix db) iteration never lands in the median.
-#   * the nix_build micro-benchmark puts $RANDOM$$ in the derivation name so
-#     it is a genuine cache miss on every iteration -- otherwise you are
-#     timing a store lookup, and every machine looks equally fast.
-#   * SSH multiplexing is turned on explicitly HERE (with an explicit
-#     ControlPath, and `ssh -O exit` against that same path in the EXIT trap)
-#     because a command-line -o beats ssh_config, and because the builder
-#     blocks in ssh_config deliberately turn multiplexing OFF.
-#
-# Host table, in precedence order:
-#   1. positional arguments:  nix-builder-bench 'boxA | ssh boxA' 'here | local'
-#   2. $BENCH_HOSTS_FILE      one entry per line, same format
-#   3. $BENCH_HOSTS           newline-separated, same format
-# Format is "label | command", where command is anything that accepts a
-# program on stdin (usually `ssh <alias>`), or the literal word `local`.
-#
-# Tunables (all optional):
-#   BENCH_LIST          space-separated benchmark names (default: all but disk_rand/mem_bw)
-#   BENCH_RUNS          hyperfine measurement runs   (default 3)
-#   BENCH_WARMUP        hyperfine warmup runs        (default 1, discarded)
-#   BENCH_DISK_SIZE_MB  fio working-set size in MiB  (default 256)
-#   BENCH_NIX_PKGS      flake refs realised on the remote for the toolchain
-#   RESULTS_DIR         where per-host logs and results.tsv land
 
 set -euo pipefail
 
@@ -54,11 +20,6 @@ printf 'host\tbenchmark\tstatus\tmetrics\n' >"$TSV"
 declare -a HOST_LABELS=()
 declare -A HOST_SPEC=()
 
-# Tear the multiplexed masters down explicitly. `ssh -O exit` can only find a
-# socket it is told about, so the ControlPath here MUST be spelled exactly as
-# it was when the master was started -- there is no "the" control path to
-# inherit, and a leaked master keeps a session (and its environment) alive
-# well past the end of this script.
 cleanup() {
   local label spec
   ((${#HOST_LABELS[@]} == 0)) && return 0
@@ -83,10 +44,6 @@ trim() {
   printf '%s' "$s"
 }
 
-# Multiplexing is requested on the COMMAND LINE, not in ssh_config. ssh reads
-# command-line -o first and first-obtained-value wins, so this works even
-# though the builder's ssh_config block says `ControlMaster no` -- and the
-# builder's block keeps saying no for everyone else, which is the point.
 remote_bash() {
   local label="$1" spec="$2"
   if [[ "$spec" == "local" ]]; then
@@ -103,10 +60,6 @@ remote_bash() {
   fi
 }
 
-# One `exec nix shell` for the whole program. Everything after this line runs
-# inside that shell, so hyperfine/fio/jq/coreutils are the SAME builds for
-# every benchmark on every host, and the realisation cost is paid once and
-# outside the measured region.
 remote_header() {
   cat <<EOF
 set -eu
@@ -247,20 +200,6 @@ hf 'nix eval --impure --expr "builtins.length (builtins.genList (i: i) 100000)"'
 EOF
 }
 
-# $RANDOM$$ makes every iteration a derivation Nix has never seen, so this
-# measures a real build round-trip (hash, write .drv, fork the builder, register
-# the output) instead of a store hit. Without it every host reports the same
-# few milliseconds and the benchmark is worthless.
-#
-# --builders '' is equally load-bearing: a host that already HAS remote
-# builders configured forwards this derivation straight back out over the
-# network, and you end up timing some third machine. (It only works if you are
-# a trusted user there; otherwise Nix ignores the flag and says so.)
-#
-# builtins.storePath, not a bare string: a plain "/nix/store/..." literal carries
-# no string context, so it is not an input of the derivation and the build
-# sandbox does not bind-mount it -- the build then dies with
-# `error: executing '/nix/store/.../bin/bash': No such file or directory`.
 bench_nix_build() {
   cat <<'EOF'
 BASH_ROOT=$(dirname "$(dirname "$(command -v bash)")")

@@ -1,23 +1,3 @@
-# microvm-ram-snapshot-clones
-#
-# Sub-second, per-project throwaway dev VMs. Boot a microvm guest once, freeze
-# its live RAM to a compressed image (QMP `stop` + `migrate` to `exec:zstd`),
-# then spawn clones by streaming that image back into a fresh QEMU via
-# `-incoming exec:zstd -d`. Clones wake up already-booted.
-#
-# There is no block device at all: /nix/store is shared read-only over
-# virtiofs (cache=always, so clones cost zero store duplication), and the
-# project directory is bound read-write as the workspace (cache=auto), so
-# edits inside the clone are edits on the host tree.
-#
-# Clone identity is *derived*, not assigned: md5(realpath project-dir) yields a
-# stable VM name and SSH port, so the same directory always maps to the same
-# clone. The base snapshot only rebuilds when the guest `toplevel` nix hash
-# changes, so refresh is a cheap no-op most of the time.
-#
-# This is a generic NixOS module. Import it, point `guestSystem` at an
-# evaluated microvm nixosSystem, set `guestUser`, and enable. See README.md.
-
 {
   config,
   lib,
@@ -27,8 +7,6 @@
 let
   cfg = config.modules.microvmClone;
 
-  # The guest is an evaluated microvm nixosSystem. We reach into it for the
-  # kernel, initrd and toplevel that QEMU boots directly (no bootloader).
   vmCfg = cfg.guestSystem.config;
   kernel = "${vmCfg.microvm.kernel.out}/${pkgs.linux.target}";
   initrd = vmCfg.microvm.initrdPath;
@@ -47,14 +25,8 @@ let
 
   sshOpts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ${cfg.sshExtraOpts}";
 
-  # Agent forwarding is off by default: anything running in the guest (including
-  # the untrusted build steps/agents this VM is meant to host) can use a
-  # forwarded agent socket to authenticate as the caller. Opt in via
-  # forwardAgent only when the guest is trusted.
   sshAgentOpt = lib.optionalString cfg.forwardAgent "-A";
 
-  # Boot the microvm straight from kernel+initrd+toplevel. The memory backend is
-  # a shared memfd, which is what makes the live-RAM migrate/restore cheap.
   commonQemuFlags = ''
     -M q35,accel=kvm:tcg \
     -m ${mem} \
@@ -67,8 +39,6 @@ let
     -numa node,memdev=mem \
     -object memory-backend-memfd,id=mem,size=${mem}M,share=on'';
 
-  # Minimal QMP client. Speaks the JSON line protocol to drive
-  # stop/migrate/cont, which is how we freeze and thaw a running guest.
   qmpScript =
     pkgs.writers.writePython3 "microvm-clone-qmp"
       {
@@ -183,8 +153,6 @@ let
         sock.close()
       '';
 
-  # Derive clone identity from the project path: same dir -> same name+port.
-  # Note the port space is 800 wide, so distinct dirs *can* collide on a port.
   resolve = ''
     resolve_clone() {
       local project_dir="$(realpath "''${1:-$PWD}")"
@@ -269,16 +237,18 @@ let
         -device vhost-user-fs-pci,chardev=fs-ro-store,tag=ro-store \
         -chardev socket,id=fs-workspace,path="$SNAPSHOT_DIR/virtiofs-workspace.sock" \
         -device vhost-user-fs-pci,chardev=fs-workspace,tag=workspace \
-        -netdev user,id=net0,hostfwd=tcp::2299-:22 \
+        -netdev user,id=net0,hostfwd=tcp::2199-:22 \
         -device virtio-net-pci,netdev=net0,mac=02:00:00:ff:ff:ff \
         -qmp unix:"$SNAPSHOT_DIR/qmp.sock",server,nowait \
-        > /dev/null 2>&1 &
+        > "$SNAPSHOT_DIR/qemu.log" 2>&1 &
       echo $! > "$SNAPSHOT_DIR/qemu.pid"
 
       for _i in $(seq 1 60); do
         [ -S "$SNAPSHOT_DIR/qmp.sock" ] && break
         if ! kill -0 "$(cat "$SNAPSHOT_DIR/qemu.pid")" 2>/dev/null; then
-          echo "QEMU failed to start" >&2; exit 1
+          echo "QEMU failed to start:" >&2
+          cat "$SNAPSHOT_DIR/qemu.log" >&2
+          exit 1
         fi
         sleep 0.2
       done
@@ -290,6 +260,7 @@ let
       for _i in $(seq 1 900); do
         if [ -f "$SNAPSHOT_DIR/qemu.pid" ] && ! kill -0 "$(cat "$SNAPSHOT_DIR/qemu.pid")" 2>/dev/null; then
           echo "QEMU died during boot" >&2
+          cat "$SNAPSHOT_DIR/qemu.log" >&2
           tail -n 20 "$SNAPSHOT_DIR/console.log" >&2 2>/dev/null || true
           exit 1
         fi
@@ -395,7 +366,7 @@ let
         -device virtio-net-pci,netdev=net0,mac=02:00:00:00:00:10 \
         -qmp unix:"''${CLONE_DIR}/qmp.sock",server,nowait \
         -incoming "exec:${zstd} -d -c $SNAPSHOT_FILE" \
-        > /dev/null 2>&1 &
+        > "''${CLONE_DIR}/qemu.log" 2>&1 &
       echo $! > "''${CLONE_DIR}/qemu.pid"
 
       for _i in $(seq 1 120); do
@@ -415,7 +386,9 @@ let
         fi
         if ! kill -0 "$(cat "''${CLONE_DIR}/qemu.pid" 2>/dev/null)" 2>/dev/null; then
           printf " failed\n" >&2
-          echo "QEMU died during restore (see ''${CLONE_DIR}/console.log)" >&2
+          echo "QEMU died during restore:" >&2
+          cat "''${CLONE_DIR}/qemu.log" >&2
+          echo "(guest console: ''${CLONE_DIR}/console.log)" >&2
           exit 1
         fi
         sleep 0.5
@@ -828,17 +801,13 @@ in
             RemainAfterExit = true;
             ExecStart = "${vmCli}/bin/vm update";
             TimeoutStartSec = "300";
+            Restart = "on-failure";
+            RestartSec = "15s";
           };
+          unitConfig.StartLimitIntervalSec = "10min";
+          unitConfig.StartLimitBurst = "4";
         };
 
-        # clonesDir is a shared runtime dir the vm CLI writes pid/socket/state
-        # files into. Sticky bit (1777) so any local user can create their own
-        # clone state but cannot rename or delete another user's -- without the
-        # sticky bit, since clone identity is a predictable md5(project-dir), a
-        # local attacker could pre-create or clobber a victim's CLONE_DIR (plant
-        # a pidfile to make `vm stop`/`vm list` kill an arbitrary PID, or symlink
-        # the dir elsewhere). On a single-user workstation 0755 is also fine; set
-        # clonesDir per-user (e.g. under /run/user/$UID) to isolate fully.
         systemd.tmpfiles.rules = [
           "d ${cfg.snapshotDir} 0755 root root - -"
           "d ${cfg.clonesDir}   1777 root root - -"
@@ -902,11 +871,6 @@ in
             }
           '';
         };
-        # Runs as root at every activation over user-owned homes. Treat the
-        # per-home path as hostile: derive the owner from the directory itself
-        # (not basename), refuse to traverse any user-planted symlink in the
-        # .config/direnv/lib chain, and never `chown -R` a user-controlled root
-        # -- only create real dirs and chown the single symlink we own.
         system.activationScripts.devvm-direnv-link = ''
           for home in /home/*/; do
             home="''${home%/}"

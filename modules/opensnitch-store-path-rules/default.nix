@@ -20,9 +20,6 @@ let
 
   cfg = config.services.opensnitchStorePathRules;
 
-  # RE2 (Go's regexp, what opensnitchd compiles rule regexes with) has no
-  # \Q..\E, so literal path components have to be escaped by hand. Backslash
-  # first, or every escape we add gets escaped again.
   escapeRe =
     s:
     builtins.replaceStrings
@@ -60,7 +57,6 @@ let
       ]
       s;
 
-  # "bin/foo" -> { dir = "bin/"; leaf = "foo"; }, both already regex-escaped.
   splitSubpath =
     subpath:
     let
@@ -71,8 +67,6 @@ let
       leaf = lib.last parts;
     };
 
-  # The whole point of the recipe: a matcher for a *shape* of store path, not
-  # for one hash. See README "Trap 1".
   binaryRegex =
     b:
     if b.regex != null then
@@ -112,9 +106,6 @@ let
     else
       operand "regexp" "process.path" binaryRegexes.${r.binary};
 
-  # Operand order is fixed -- process, network, port, host -- so that a rule's
-  # generated JSON is a pure function of its spec and never depends on the
-  # order somebody happened to write the options in.
   operandsOf =
     r:
     optional (r.binary != null || r.processRegex != null || r.processPath != null) (processOperand r)
@@ -344,7 +335,6 @@ let
     };
   });
 
-  # ---- lints -------------------------------------------------------------
   processRegexes =
     lib.mapAttrsToList (n: b: {
       what = "binaries.${n}";

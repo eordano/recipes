@@ -1,39 +1,3 @@
-# archive-organize-sync
-#
-# A timer-driven NixOS behavior that:
-#   1. Organizes a local archive directory into YYYY.MM month folders (by mtime),
-#   2. Additively rsyncs it to a remote/backup directory, then
-#   3. Prunes local files older than N days -- but ONLY after sha256-verifying
-#      that an identical copy already exists on the remote.
-#
-# The important part is the ordering and the safety gate: organize -> sync ->
-# verify -> prune. A local file is never deleted until its remote twin is
-# proven byte-identical (sha256), so an interrupted or failed sync can never
-# cause data loss. yt-dlp sidecar files (.info.json, thumbnails, subtitles) are
-# kept grouped with their media by anchoring the whole group on the *media*
-# file's date rather than each sidecar's own mtime.
-#
-# This module is self-contained: it ships both helper scripts inline, so you
-# can drop it into any NixOS configuration and `import` it. Nothing outside
-# this file is required.
-#
-# Usage:
-#   imports = [ ./archive-organize-sync ];
-#   services.archiveOrganizeSync = {
-#     enable = true;
-#     user = "alice";
-#     localPath = "/home/alice/archive";
-#     remotePath = "/mnt/backup/archive";
-#     retentionDays = 14;
-#     folders = [
-#       { name = "downloads";   mode = "organize"; }   # organize + sync + prune
-#       { name = "screenshots"; mode = "organize"; }
-#       { name = "photos";      mode = "sync-only"; }   # never prune, never reorganize
-#       { name = "videos";      mode = "ytdlp"; }       # organize keeping sidecars grouped
-#     ];
-#     defaultMode = "sync-prune";                       # any subdir not listed above
-#   };
-
 {
   config,
   lib,
@@ -44,13 +8,6 @@
 let
   cfg = config.services.archiveOrganizeSync;
 
-  # --- organize-yyyy-mm ----------------------------------------------------
-  # Sorts loose entries in the current directory into YYYY.MM folders keyed on
-  # each entry's mtime. A `.organize-yyyy-mm.config` keep-list (one name per
-  # line, #-comments allowed) pins files that must never be sorted. With
-  # `--ytdlp`, media files and their same-stem sidecars are moved together into
-  # the media file's month, so an .info.json lands next to its video instead of
-  # being sorted independently by its own (different) mtime.
   organize-yyyy-mm = pkgs.writeShellApplication {
     name = "organize-yyyy-mm";
     runtimeInputs = with pkgs; [ coreutils ];
@@ -174,25 +131,10 @@ let
     '';
   };
 
-  # --- routing table -------------------------------------------------------
-  # Build the bash associative array that maps a subdirectory name to its mode.
   folderModeLines = lib.concatMapStringsSep "\n" (
     f: "MODE[${lib.escapeShellArg f.name}]=${lib.escapeShellArg f.mode}"
   ) cfg.folders;
 
-  # --- archive-sync-start --------------------------------------------------
-  # Walks each immediate subdirectory of LOCAL_PATH and applies its mode:
-  #
-  #   organize    organize into YYYY.MM, sync to remote, prune verified-synced
-  #               files older than retentionDays
-  #   ytdlp       like organize but keeps yt-dlp sidecars grouped with media
-  #   ytdlp-only  like ytdlp but never prunes -- for a library the remote is a
-  #               backup of rather than an offload target
-  #   sync-only   sync to remote, never reorganize, never prune
-  #   sync-prune  sync to remote, prune verified-synced old files (no reorganize)
-  #
-  # Prune is gated on a sha256 match against the remote copy: a local file is
-  # removed only once its remote twin is proven byte-identical.
   archive-sync-start = pkgs.writeShellApplication {
     name = "archive-sync-start";
     runtimeInputs = with pkgs; [

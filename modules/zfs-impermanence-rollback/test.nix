@@ -54,8 +54,6 @@ let
 
   failedAssertions = c: map (a: a.message) (lib.filter (a: !a.assertion) c.assertions);
 
-  # The guard rail fires when `neededForBoot` is taken away, and -- the part that
-  # keeps this from being vacuous -- nothing else fires when it is not.
   guardRail =
     failedAssertions wiring == [ ]
     && lib.any (m: lib.hasInfix "is not neededForBoot" m) (
@@ -68,26 +66,18 @@ let
 
   pool = "tank";
 
-  # ---- option branches nothing else exercises -------------------------------
-  # These are eval-level: each one is a distinct generated-unit shape, and
-  # proving the shape is what matters. Booting a VM per branch would cost ~45
-  # minutes each to assert the same strings.
   unitFor =
     extra: name:
     (evalConfig (baseWiring {
       zfsWipeOnBoot.datasets.${name} = extra;
     })).config.boot.initrd.systemd.units."zfs-wipe-${name}.service";
 
-  # `.text` is the unit FILE; the rollback logic lives in the service's script.
   scriptFor =
     extra: name:
     (evalConfig (baseWiring {
       zfsWipeOnBoot.datasets.${name} = extra;
     })).config.boot.initrd.systemd.services."zfs-wipe-${name}".script;
 
-  # onMissingSnapshot: three genuinely different behaviours when @blank is gone.
-  # "fail" is the safe default -- refusing to boot beats silently keeping state
-  # that was supposed to be discarded.
   missingFails = lib.hasInfix "Refusing to boot" (scriptFor { onMissingSnapshot = "fail"; } "state");
   missingCreates = lib.hasInfix "creating it from the CURRENT" (
     scriptFor { onMissingSnapshot = "create"; } "state"
@@ -96,23 +86,13 @@ let
     scriptFor { onMissingSnapshot = "ignore"; } "state"
   );
 
-  # failHard escalates a failed wipe to emergency.target. Without it a failed
-  # rollback is just a failed unit and the machine boots carrying the state it
-  # was meant to discard -- the silent version of the bug this recipe exists for.
   failHardEscalates =
     lib.hasInfix "OnFailure=emergency.target"
       (unitFor { failHard = true; } "state").text;
-  # failHard defaults to TRUE: the module fails safe, dropping to the initrd
-  # emergency shell rather than booting with state that should have been gone.
-  # It is disableable precisely because on a remote host with neither
-  # emergencyAccess nor initrd SSH, emergency.target is an unreachable brick.
   failHardOnByDefault = lib.hasInfix "OnFailure=emergency.target" (unitFor { } "state").text;
   failHardCanBeDisabled =
     !(lib.hasInfix "OnFailure=emergency.target" (unitFor { failHard = false; } "state").text);
 
-  # recursive controls whether child datasets go too. Getting this wrong is
-  # silent in both directions: -r when you meant not to destroys nested state,
-  # and omitting it leaves children un-wiped while the parent looks clean.
   recursiveByDefault = lib.hasInfix "zfs rollback -r " (scriptFor { } "state");
   nonRecursiveOmitsFlag =
     let
@@ -120,18 +100,6 @@ let
     in
     lib.hasInfix "zfs rollback \"" t && !(lib.hasInfix "rollback -r" t);
 in
-assert enforcedNeededForBoot;
-assert anchoredOnSysroot;
-assert orderedAfterImport;
-assert guardRail;
-assert missingFails;
-assert missingCreates;
-assert missingIgnores;
-assert failHardEscalates;
-assert failHardOnByDefault;
-assert failHardCanBeDisabled;
-assert recursiveByDefault;
-assert nonRecursiveOmitsFlag;
 pkgs.testers.runNixOSTest {
   name = "zfs-impermanence-rollback";
 
@@ -241,6 +209,18 @@ pkgs.testers.runNixOSTest {
     };
 
   testScript =
+    assert enforcedNeededForBoot;
+    assert anchoredOnSysroot;
+    assert orderedAfterImport;
+    assert guardRail;
+    assert missingFails;
+    assert missingCreates;
+    assert missingIgnores;
+    assert failHardEscalates;
+    assert failHardOnByDefault;
+    assert failHardCanBeDisabled;
+    assert recursiveByDefault;
+    assert nonRecursiveOmitsFlag;
     { nodes, ... }:
     let
       wiped = nodes.machine.specialisation.wiped.configuration.system.build.toplevel;

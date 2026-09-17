@@ -1,24 +1,3 @@
-# zfs-native-encryption-keys -- load ZFS *native* encryption keys for non-root
-# pools from a runtime secret, ordered so nothing touches the mountpoints
-# before the datasets are actually mounted.
-#
-# ZFS native encryption is per-dataset (per "encryption root"), not per block
-# device, so unlocking is `zfs load-key`, not `cryptsetup open`. nixpkgs only
-# ever loads keys as a side effect of importing a pool, from whatever
-# `keylocation` the dataset carries on disk. That is fine for a root pool
-# answered by a boot prompt, and wrong for a data pool whose key comes from a
-# secret manager: you want the key path to live in the NixOS config, not
-# baked into an on-disk property, you want a missing key to FAIL rather than
-# hang on a console prompt nobody is watching, and you want consumers ordered
-# after the datasets are mounted.
-#
-# `zfs load-key -L <location>` overrides the stored `keylocation` for that one
-# call without rewriting the property, which is what makes it possible to keep
-# `keylocation=prompt` on disk (nothing on the disk points at the key) and
-# still unlock from a runtime file.
-#
-# See README.md for the traps, including the `grep -q available` substring bug
-# that silently turns a hand-rolled version of this unit into a no-op.
 {
   config,
   lib,

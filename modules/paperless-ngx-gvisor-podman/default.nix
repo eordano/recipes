@@ -1,21 +1,3 @@
-# paperless-ngx-gvisor-podman
-#
-# Run paperless-ngx as a gVisor-isolated podman container behind nginx + TLS.
-#
-# The security boundary is gVisor's `runsc` sandbox, NOT the container's network
-# namespace. Because runsc is the isolation layer, the container runs with
-# `--network=host` so it can reach a loopback-only Redis on the host at
-# 127.0.0.1. The two traps this module bakes in:
-#
-#   1. tmpfiles pre-creates every bind-mount dir owned by exactly the uid/gid
-#      that the image's USERMAP_UID/USERMAP_GID map paperless to. Skip this and
-#      first-run writes fail with permission errors on a fresh dataDir.
-#   2. PAPERLESS_URL / PAPERLESS_CSRF_TRUSTED_ORIGINS must equal the public
-#      https URL, or login/CSRF breaks behind the reverse proxy.
-#
-# Drop-in: import this module and set `services.paperlessGvisor.enable = true`
-# plus `domain`. See README.md for the full option list and caveats.
-
 {
   config,
   pkgs,
@@ -38,6 +20,20 @@ in
 {
   options.services.paperlessGvisor = {
     enable = mkEnableOption "paperless-ngx as a gVisor-isolated podman container";
+
+    backend = mkOption {
+      type = types.enum [
+        "podman"
+        "docker"
+      ];
+      default = "podman";
+      description = ''
+        OCI backend the container runs on. `virtualisation.oci-containers.backend`
+        is one setting per host, so a host whose other containers are docker
+        picks "docker" here; the gVisor `runsc-host` runtime is registered with
+        whichever daemon is chosen and the unit is named `<backend>-paperless`.
+      '';
+    };
 
     domain = mkOption {
       type = types.nullOr types.str;
@@ -164,7 +160,6 @@ in
   };
 
   config = mkIf cfg.enable (mkMerge [
-    # ---- assertions ---------------------------------------------------------
     {
       assertions = [
         {
@@ -174,11 +169,7 @@ in
       ];
     }
 
-    # ---- gVisor podman runtime ---------------------------------------------
-    # This is where the isolation lives. `runsc-host` is a runsc invocation with
-    # host networking, registered as a named OCI runtime that the container below
-    # selects with `--runtime=runsc-host`.
-    {
+    (mkIf (cfg.backend == "podman") {
       virtualisation.podman = {
         enable = true;
         extraPackages = [ pkgs.gvisor ];
@@ -187,9 +178,14 @@ in
       virtualisation.containers.containersConf.settings.engine.runtimes.runsc-host = [
         "${pkgs.writeShellScript "runsc-host" ''exec ${pkgs.gvisor}/bin/runsc --network=host "$@"''}"
       ];
-    }
+    })
 
-    # ---- reverse proxy ------------------------------------------------------
+    (mkIf (cfg.backend == "docker") {
+      virtualisation.docker.daemon.settings.runtimes.runsc-host = {
+        path = "${pkgs.writeShellScript "runsc-host" ''exec ${pkgs.gvisor}/bin/runsc --network=host "$@"''}";
+      };
+    })
+
     (mkIf cfg.manageNginx {
       services.nginx.virtualHosts.${cfg.domain} = {
         forceSSL = true;
@@ -203,7 +199,6 @@ in
       };
     })
 
-    # ---- loopback Redis -----------------------------------------------------
     (mkIf cfg.manageRedis {
       services.redis.servers.paperless = {
         enable = true;
@@ -211,18 +206,13 @@ in
         bind = "127.0.0.1";
       };
 
-      # Redis must be up before paperless dials it.
-      systemd.services.podman-paperless = {
+      systemd.services."${cfg.backend}-paperless" = {
         after = [ "redis-paperless.service" ];
         requires = [ "redis-paperless.service" ];
       };
     })
 
-    # ---- container + state --------------------------------------------------
     {
-      # TRAP: pre-create every bind-mount dir 0700 owned by uid/gid *before* the
-      # container starts. USERMAP_UID/GID below run paperless as that same id, so
-      # matching ownership is what makes first-run writes succeed.
       systemd.tmpfiles.rules = [
         "d ${cfg.dataDir} 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
         "d ${cfg.dataDir}/data 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
@@ -231,7 +221,7 @@ in
         "d ${cfg.dataDir}/export 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
       ];
 
-      virtualisation.oci-containers.backend = "podman";
+      virtualisation.oci-containers.backend = cfg.backend;
       virtualisation.oci-containers.containers.paperless = {
         inherit (cfg) image;
 
@@ -253,10 +243,7 @@ in
         // cfg.extraEnvironment;
 
         extraOptions = [
-          # Isolation comes from runsc, not the netns...
           "--runtime=runsc-host"
-          # ...so host networking is safe here, and it lets the container reach
-          # the loopback-only Redis at 127.0.0.1.
           "--network=host"
         ];
 

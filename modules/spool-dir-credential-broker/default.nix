@@ -1,18 +1,3 @@
-# spool-dir-credential-broker -- keep a bearer token out of unprivileged
-# sandboxes by putting one hardened watcher between them and a REST API.
-#
-# Unprivileged producers (sandboxed jobs, agents, user sessions) only ever
-# drop a JSON manifest into a shared, sticky 1777 spool directory. They never
-# see the credential. A single hardened, credential-holding systemd unit
-# watches that directory with inotify and is the *only* process that forwards
-# the manifests to the upstream REST API.
-#
-# The token is re-read from `tokenFile` on every request, so rotating the
-# secret takes effect with no restart of the watcher.
-#
-# This module is self-contained: import it, set `enable = true`, and provide
-# `tokenFile`, `upstreamUrl`, and `user`. You are responsible for creating the
-# spool directory as 1777 (see README) -- this unit only reads/writes it.
 {
   config,
   lib,
@@ -204,8 +189,6 @@ in
         Group = cfg.group;
         Restart = "on-failure";
         RestartSec = 5;
-        # Hardening: if the broker is ever compromised it holds the token, so
-        # confine it to nothing but reading the token and writing the spool.
         ProtectSystem = "strict";
         ProtectHome = true;
         PrivateTmp = true;

@@ -1,31 +1,3 @@
-# vaultwarden-gvisor-sandbox
-#
-# Self-hosted Vaultwarden (Bitwarden-compatible) vault, running as a
-# gVisor-sandboxed podman container built from a locally-produced,
-# registry-free reproducible image. nginx terminates TLS and reverse-proxies
-# loopback with websockets on for live vault sync.
-#
-# Why this shape:
-#   - A secrets vault is a high-value target. Running it under gVisor
-#     (--runtime=runsc-host) means container syscalls hit gVisor's user-space
-#     kernel, not the host kernel -- a container escape has far less to attack.
-#   - The image is built with dockerTools.buildLayeredImage from nixpkgs'
-#     `vaultwarden`, so there is no upstream registry to trust and the image
-#     is reproducible and pinned.
-#   - `--network=host` lets the container bind `port` directly; nginx reaches
-#     it on 127.0.0.1 with no port-mapping layer in between.
-#   - The env file MUST pre-exist: `environmentFiles` fails the unit if the
-#     path is missing, so preStart touch-es it (empty is fine -- it holds
-#     optional secrets like the admin token or SMTP credentials).
-#
-# Drop-in usage:
-#   imports = [ ./vaultwarden-gvisor-sandbox ];
-#   services.vaultwardenSandbox = {
-#     enable   = true;
-#     domain   = "vault.example.com";
-#     acmeHost = "vault.example.com";   # a security.acme cert you manage
-#   };
-
 {
   config,
   lib,
@@ -36,7 +8,6 @@ with lib;
 let
   cfg = config.services.vaultwardenSandbox;
 
-  # Reproducible, registry-free image built from nixpkgs' vaultwarden.
   vaultwardenImage = pkgs.dockerTools.buildLayeredImage {
     name = "vaultwarden";
     tag = "latest";
@@ -132,10 +103,6 @@ in
   };
 
   config = mkIf cfg.enable (mkMerge [
-    # --- gVisor podman runtime -------------------------------------------
-    # Registers a `runsc-host` OCI runtime backed by gVisor. Inlined here so
-    # the module is self-contained; if you already register gVisor elsewhere,
-    # drop this block.
     {
       virtualisation.podman = {
         enable = true;
@@ -147,7 +114,6 @@ in
       ];
     }
 
-    # --- the vault -------------------------------------------------------
     {
       services.nginx.enable = true;
       services.nginx.virtualHosts."${cfg.domain}" = {
@@ -156,7 +122,7 @@ in
 
         locations."/" = {
           proxyPass = "http://127.0.0.1:${toString cfg.port}";
-          proxyWebsockets = true; # required for live vault sync
+          proxyWebsockets = true;
         };
       };
 
@@ -173,8 +139,6 @@ in
         "d ${cfg.dataDir} 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
       ];
 
-      # environmentFiles fails the unit if the path is missing, so make sure
-      # the env file exists (empty is fine) and reclaim ownership of dataDir.
       systemd.services.podman-vaultwarden.preStart = lib.mkAfter ''
         touch ${cfg.dataDir}/env
         chown -R ${toString cfg.uid}:${toString cfg.gid} ${cfg.dataDir}
@@ -187,11 +151,6 @@ in
         user = "${toString cfg.uid}:${toString cfg.gid}";
         environment = {
           DOMAIN = "https://${cfg.domain}";
-          # Under --network=host the container shares the host netns, so this
-          # bind address is a host-wide bind. Keep it on loopback: nginx is the
-          # only intended front-end and it proxies to 127.0.0.1. Binding
-          # 0.0.0.0 here would expose the plaintext vault API on every host
-          # interface (LAN/tailnet/public), bypassing TLS.
           ROCKET_ADDRESS = cfg.listenAddress;
           ROCKET_PORT = toString cfg.port;
           ROCKET_LOG = "info";

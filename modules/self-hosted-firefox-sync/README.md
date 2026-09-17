@@ -57,11 +57,17 @@ match the nginx `proxyPass`. If you truly need a different port you must also
 mount a config file setting `port = ...` -- changing the module option alone will
 just make nginx proxy to a dead port.
 
-### 3. `--network=host`
+### 3. No host networking
 
-The container uses host networking so syncserver binds 8000 directly on the host
-loopback and nginx proxies to `127.0.0.1:8000`. Keep this in mind if you run
-multiple host-network containers -- the ports share the host namespace.
+The container gets an ordinary bridge network; only syncserver's 8000 is
+published, on the host loopback (`127.0.0.1:<port>`), and nginx proxies to it.
+MariaDB's 3306 stays inside the container. syncserver defaults to binding
+127.0.0.1, which a published port cannot reach (traffic arrives on the
+container's eth0), so the image sets `SYNC_HOST=0.0.0.0`; MariaDB keeps 127.0.0.1.
+The move off `--network=host` happened while chasing a 502 on one host that turned
+out to be a host firewall rule dropping all of port 8000 ahead of the loopback
+accept, not gVisor; the bridge layout stays because it keeps the database off
+the host.
 
 ## Usage
 
@@ -81,6 +87,21 @@ multiple host-network containers -- the ports share the host namespace.
 Then point Firefox at your server: in `about:config` set
 `identity.sync.tokenserver.uri` to
 `https://ffsync.example.com/1.0/sync/1.5` and re-log-in to your Firefox Account.
+
+### Configuration is baked into the image
+
+syncserver reads its settings from `SYNC_*` environment variables (`__` is the
+section separator). The image ships everything that is not a secret: both
+database URLs (`mysql://root@127.0.0.1:3306/{syncstorage,tokenserver}`), the
+tokenserver switched on against Mozilla's accounts service
+(`FXA_EMAIL_DOMAIN`, `FXA_OAUTH_SERVER_URL`), `RUN_MIGRATIONS`, and the
+single-node capacity release rate. Values in `secretsFile` override them.
+
+A tokenserver with no `services`/`nodes` rows answers every login with an
+error, so the host unit's `postStart` waits for the tokenserver migrations to
+create those tables and upserts node 1 as `https://ffsync.<domain>` with
+`nodeCapacity` accounts (default 10), the same bootstrap NixOS's
+`services.firefox-syncserver.singleNode` does.
 
 ### The secret
 
@@ -106,6 +127,7 @@ path. Keep it stable: rotating it invalidates existing sync data.
 | `mariadbDataDir` | `/var/lib/firefox-sync/mariadb` | Bind-mounted at `/var/lib/mysql`. |
 | `uid` / `gid` | `990` | Load-bearing in three places (trap 1). Any free id. |
 | `secretsFile` | -- | Env file with `SYNC_MASTER_SECRET`. Required. |
+| `nodeCapacity` | `10` | Accounts the single node advertises to the tokenserver. |
 | `extraPodmanOptions` | `[]` | Extra podman flags, e.g. `[ "--runtime=runsc" ]` for gVisor. |
 
 ## Hardened runtime (optional)
@@ -122,12 +144,10 @@ modules.services.firefox-sync.extraPodmanOptions = [ "--runtime=runsc" ];
 
 - **Bundled MariaDB root has no password.** The entrypoint leaves the `root`
   account on `unix_socket` auth (plus an empty password), and syncserver talks
-  to the DB as root. mariadbd is started with `--bind-address=127.0.0.1`, so the
-  database is reachable only on host loopback -- but under `--network=host` that
-  loopback is the *host's*, so any local process on the host can reach
-  `127.0.0.1:3306`, and you must not open port 3306 in the host firewall. The DB
-  holds only your own sync blobs (encrypted client-side by Firefox), but treat
-  the host as the trust boundary.
+  to the DB as root. mariadbd is started with `--bind-address=127.0.0.1` inside
+  the container's own network namespace, so nothing on the host reaches it; the
+  host-side node bootstrap goes through `<backend> exec`. The DB holds only your
+  own sync blobs (encrypted client-side by Firefox).
 - **The entrypoint is world-readable.** It is emitted via `writeShellScript`, so
   it lives in `/nix/store` readable by every local user. Keep real secrets out
   of it; the only sensitive value (`SYNC_MASTER_SECRET`) is passed separately via

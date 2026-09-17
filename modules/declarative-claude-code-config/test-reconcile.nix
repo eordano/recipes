@@ -1,10 +1,5 @@
 { pkgs }:
 let
-  lib = pkgs.lib;
-  moduleText = builtins.readFile ./default.nix;
-  _wired =
-    assert lib.hasInfix "./reconcile.jq" moduleText;
-    true;
   jq = "${pkgs.jq}/bin/jq";
   prog = ./reconcile.jq;
 in

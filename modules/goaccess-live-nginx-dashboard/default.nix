@@ -1,18 +1,3 @@
-# GoAccess real-time HTML log dashboard, served over nginx + WebSocket,
-# gated to an IP allow-list.
-#
-# A self-contained NixOS module. Import it and set at minimum:
-#
-#   services.goaccessDashboard = {
-#     enable = true;
-#     domain = "stats.example.com";
-#     allowedIPs = [ "203.0.113.0/24" ];   # who may view the dashboard
-#   };
-#
-# See README.md for the two traps this module exists to solve:
-#   1. nixpkgs' goaccess ships WITHOUT MaxMind MMDB support -> overrideAttrs.
-#   2. the log-format '%' signs must be doubled ('%%h') because the string
-#      lands in a systemd ExecStart, where a bare '%' is a unit specifier.
 {
   config,
   lib,
@@ -23,8 +8,6 @@ with lib;
 let
   cfg = config.services.goaccessDashboard;
 
-  # Trap 1: nixpkgs' goaccess is built without MaxMind (.mmdb) GeoIP support.
-  # Rebuild it with the geoip flag rather than forking the package.
   goaccessWithGeoIP = pkgs.goaccess.overrideAttrs (oldAttrs: {
     configureFlags = (oldAttrs.configureFlags or [ ]) ++ [
       "--enable-geoip=mmdb"
@@ -33,11 +16,6 @@ let
     buildInputs = (oldAttrs.buildInputs or [ ]) ++ [ pkgs.libmaxminddb ];
   });
 
-  # Opt-in bundled GeoIP updater (geoipUpdater.enable = false by default).
-  # Fetches GeoLite2 .mmdb files from a public third-party mirror, with no
-  # integrity check -- see the option description and README before enabling.
-  # The recommended path is provisioning geoipDatabaseDir yourself (e.g. via
-  # nixpkgs' `services.geoipupdate`).
   geoipUpdater = pkgs.writeShellScriptBin "goaccess-geoip-updater" ''
     set -eu
     GEOIP_DIR="${cfg.geoipDatabaseDir}"
@@ -113,10 +91,6 @@ in
 
     allowedIPs = mkOption {
       type = types.listOf types.str;
-      # The dashboard exposes full visitor logs, so it MUST be gated. There is
-      # no safe universal default -- set this to the operator/VPN/office ranges
-      # that should see it. The default below is loopback + RFC1918 private
-      # ranges as a fail-safe starting point; replace it.
       default = [
         "127.0.0.1"
         "::1"
@@ -139,14 +113,6 @@ in
 
     logFormat = mkOption {
       type = types.str;
-      # Trap 2: every '%' is DOUBLED because this string is interpolated into a
-      # systemd ExecStart, where a bare '%' is a unit specifier (%h = home dir,
-      # etc.) and '%%' is systemd's literal-percent escape. This is NOT a Nix
-      # thing -- '%' is not special in Nix strings.
-      #
-      # This default matches nginx's `combined` log format plus a trailing
-      # vhost field (`$host` / '%v'). Adjust it to whatever your nginx
-      # log_format actually emits, keeping every '%' doubled.
       default = ''%%h %%^[%%d:%%t %%^] "%%r" %%s %%b "%%R" "%%u" "%%v"'';
       description = ''
         GoAccess `--log-format` string. Every `%` MUST be doubled (`%%h`)
@@ -240,10 +206,6 @@ in
             };
           }
         );
-        # Public mirror that republishes MaxMind's GeoLite2 files without an
-        # account/license key. Trade-off: you trust the mirror's freshness and
-        # integrity (no checksum verification here). Swap for MaxMind's own
-        # authenticated downloads if you have a license key.
         default = [
           {
             name = "GeoLite2-City.mmdb";
@@ -263,7 +225,6 @@ in
     users.users.${cfg.user} = {
       isSystemUser = true;
       inherit (cfg) group;
-      # Needs to read nginx's access log and write HTML into a webroot nginx serves.
       extraGroups = [ "nginx" ];
       description = "GoAccess web log analyzer";
     }
@@ -271,15 +232,11 @@ in
 
     users.groups.${cfg.group} = optionalAttrs (cfg.gid != null) { inherit (cfg) gid; };
 
-    # nginx must be able to read the rendered HTML in the group-owned webroot.
     users.users.nginx.extraGroups = [ cfg.group ];
 
     systemd.tmpfiles.rules = [
       "d ${cfg.dataDir} 0750 ${cfg.user} ${cfg.group} - -"
       "d ${cfg.dataDir}/db 0750 ${cfg.user} ${cfg.group} - -"
-      # 0750, not 0755: the rendered index.html embeds full visitor logs (IPs,
-      # URLs, referrers, user-agents). nginx serves it via its membership in
-      # cfg.group, so no world bit is needed -- keep local accounts out.
       "d ${cfg.dataDir}/html 0750 ${cfg.user} ${cfg.group} - -"
     ]
     ++ optional cfg.geoipUpdater.enable "d ${cfg.geoipDatabaseDir} 0755 geoip geoip - -";
@@ -300,15 +257,11 @@ in
         User = cfg.user;
         Group = cfg.group;
 
-        # GoAccess parses timestamps against the C locale unless told otherwise.
         Environment = [
           "LANG=en_US.UTF-8"
           "LC_ALL=en_US.UTF-8"
         ];
 
-        # NOTE: the '%%' in logFormat/dateFormat/timeFormat are systemd escapes
-        # (see the option descriptions). systemd collapses each '%%' to a single
-        # '%' before goaccess ever sees the argument.
         ExecStart = ''
           ${goaccessWithGeoIP}/bin/goaccess \
             ${cfg.accessLog} \
@@ -343,7 +296,6 @@ in
         ];
       };
 
-      # Fail loudly rather than render a dashboard with an empty world map.
       preStart = ''
         if [ ! -f ${cfg.geoipDatabaseDir}/${head cfg.geoipDatabases} ]; then
           echo "GeoIP databases not found in ${cfg.geoipDatabaseDir}."
@@ -361,7 +313,6 @@ in
 
       root = "${cfg.dataDir}/html";
 
-      # Static dashboard HTML. IP-gated: the page contains full visitor logs.
       locations."/" = {
         index = "index.html";
         extraConfig = ''
@@ -374,8 +325,6 @@ in
         '';
       };
 
-      # WebSocket feed that pushes live updates into the open dashboard.
-      # Same allow-list, and the long read timeout keeps the socket alive.
       locations."/ws" = {
         proxyPass = "http://127.0.0.1:${toString cfg.realTimePort}";
         proxyWebsockets = true;
@@ -399,7 +348,6 @@ in
 
     environment.systemPackages = [ goaccessWithGeoIP ];
 
-    # --- Bundled GeoIP updater (optional) --------------------------------------
     users.users.geoip = mkIf cfg.geoipUpdater.enable {
       isSystemUser = true;
       group = "geoip";
@@ -415,8 +363,6 @@ in
 
       serviceConfig = {
         Type = "oneshot";
-        # RemainAfterExit keeps the unit "active" after success so goaccess.service
-        # (which Wants/After it) won't start until the databases exist at least once.
         RemainAfterExit = true;
         ExecStart = "${geoipUpdater}/bin/goaccess-geoip-updater";
         User = "geoip";
@@ -436,7 +382,6 @@ in
         OnCalendar = cfg.geoipUpdater.interval;
         OnBootSec = "5min";
         Persistent = true;
-        # Jitter so a fleet doesn't hammer the mirror at the same minute.
         RandomizedDelaySec = "1h";
       };
     };

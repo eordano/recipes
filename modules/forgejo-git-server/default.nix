@@ -1,16 +1,3 @@
-# forgejo-git-server -- self-hosting Forgejo 15.x behind nginx on NixOS.
-#
-# Supports two deployment shapes behind one option set:
-#   - asContainer = true  : a rootless podman container built from a
-#                           locally-assembled OCI image (optionally on a
-#                           sandboxed runtime like gVisor/runsc).
-#   - asContainer = false : NixOS's native services.forgejo, typically over
-#                           a unix socket.
-#
-# Both shapes share the same nginx TLS front-end, database wiring and optional
-# OIDC. Most of the file's bulk is workarounds for Forgejo 15.x's stricter
-# startup checks -- read the inline comments before touching RUN_USER, the
-# authorized_keys handling, the app.ini password templating, or proxy_buffering.
 {
   config,
   lib,
@@ -29,9 +16,6 @@ let
   containerUid = toString (if cfg.uid != null then cfg.uid else 1000);
   containerGid = toString (if cfg.gid != null then cfg.gid else 1000);
 
-  # Synthetic /etc/passwd for the container. This is load-bearing: it names the
-  # container uid "root" so that Forgejo's run-user check resolves the running
-  # user to the name we hardcode as RUN_USER below. See the RUN_USER comment.
   containerEtc = pkgs.runCommand "forgejo-etc" { } ''
     mkdir -p $out/etc $out/usr/bin
     echo 'root:x:${containerUid}:${containerGid}:root:/data:/bin/bash' > $out/etc/passwd
@@ -67,9 +51,6 @@ let
     };
   };
 
-  # The DB password never enters the Nix store: app.ini ships with a literal
-  # `FORGEJO_DB_PASSWD` placeholder that preStart sed-substitutes from the
-  # runtime passwordFile at deploy time (see podman-forgejo.preStart below).
   appIni = pkgs.writeText "forgejo-app.ini" ''
     APP_NAME = ${cfg.appName}
     # Stays "root": containerEtc names the container uid (cfg.uid) "root" in
@@ -499,9 +480,6 @@ in
         }
       ];
 
-      # Force pubkey auth options off for the forgejo user so that
-      # authorized_keys forced-commands behave predictably when git-over-ssh is
-      # routed through the host's openssh.
       services.openssh.extraConfig = ''
         Match User forgejo
           PubkeyAuthOptions none
@@ -543,8 +521,6 @@ in
         ];
       };
 
-      # Optional local Postgres auth wiring for the forgejo system user over the
-      # unix socket. Uses upstream services.postgresql string options.
       services.postgresql = mkIf (cfg.database.type == "postgres" && cfg.database.configureLocalAuth) {
         identMap = ''
           forgejo-users ${cfg.database.user} ${cfg.database.user}
@@ -591,10 +567,6 @@ in
       // lib.optionalAttrs (cfg.uid != null) { inherit (cfg) uid; };
       users.groups.forgejo = lib.optionalAttrs (cfg.gid != null) { inherit (cfg) gid; };
 
-      # Templating step: read the DB password from the runtime file and sed it
-      # into the app.ini placeholder, then lock down ownership. This keeps the
-      # password out of the Nix store while still shipping a fully-rendered
-      # config into the data volume.
       systemd.services.podman-forgejo.preStart = lib.mkAfter ''
         uid=${containerUid}
         gid=${containerGid}
@@ -662,9 +634,6 @@ in
         }
       ];
 
-      # Oneshot that waits for both Forgejo and the OIDC discovery endpoint,
-      # creates the OAuth login source via the admin CLI (idempotent), then
-      # flips is_sync_enabled directly in the DB to enable auto-registration.
       systemd.services.forgejo-oidc-setup = {
         description = "Setup Forgejo OIDC authentication source";
         after = [ "forgejo.service" ];

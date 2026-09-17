@@ -4,10 +4,6 @@ import re, sys
 path = "mlx_vlm/server.py"
 src = open(path).read()
 
-# ---------------------------------------------------------------------------
-# 1. Insert ThinkingTagParser + split_thinking after the imports, before the
-#    FastAPI app instantiation.
-# ---------------------------------------------------------------------------
 PARSER_CODE = '''
 # ---------------------------------------------------------------------------
 # Reasoning / thinking-tag parser
@@ -139,13 +135,9 @@ def split_thinking(text: str):
 
 '''
 
-# Insert before the `app = FastAPI(` line
 assert "app = FastAPI(" in src, "Cannot find 'app = FastAPI(' in server.py"
 src = src.replace("app = FastAPI(", PARSER_CODE + "app = FastAPI(", 1)
 
-# ---------------------------------------------------------------------------
-# 2. Add reasoning_content field to ChatMessage
-# ---------------------------------------------------------------------------
 old_chatmsg = '''class ChatMessage(FlexibleBaseModel):
     role: Literal["user", "assistant", "system", "developer", "tool"] = Field(
         ...,
@@ -178,9 +170,6 @@ new_chatmsg = '''class ChatMessage(FlexibleBaseModel):
 assert old_chatmsg in src, "Cannot find ChatMessage class in server.py"
 src = src.replace(old_chatmsg, new_chatmsg, 1)
 
-# ---------------------------------------------------------------------------
-# 3. Patch non-streaming response to split thinking
-# ---------------------------------------------------------------------------
 old_nonstream = '''                choices = [
                     ChatChoice(
                         finish_reason="stop",
@@ -208,11 +197,6 @@ new_nonstream = '''                _content, _reasoning = split_thinking(tool_ca
 assert old_nonstream in src, "Cannot find non-streaming choices block in server.py"
 src = src.replace(old_nonstream, new_nonstream, 1)
 
-# ---------------------------------------------------------------------------
-# 4. Patch streaming response to filter through ThinkingTagParser
-# ---------------------------------------------------------------------------
-# a) instantiate the parser before the loop
-
 old_stream_setup = '''            async def stream_generator():
                 token_iterator = None
                 try:
@@ -228,8 +212,6 @@ new_stream_setup = '''            async def stream_generator():
 
 assert old_stream_setup in src, "Cannot find stream_generator setup in server.py"
 src = src.replace(old_stream_setup, new_stream_setup, 1)
-
-# b) route each chunk.text through the parser
 
 old_stream_chunk = '''                        choices = [
                             ChatStreamChoice(
@@ -269,8 +251,6 @@ new_stream_chunk = '''                        _c_delta, _r_delta = _think_parser
 
 assert old_stream_chunk in src, "Cannot find streaming chunk block in server.py"
 src = src.replace(old_stream_chunk, new_stream_chunk, 1)
-
-# c) flush before the stop signal
 
 old_stream_end = '''                    # Signal stream end
                     choices = [
@@ -323,16 +303,9 @@ src = src.replace(old_stream_end, new_stream_end, 1)
 open(path, "w").write(src)
 print("server.py patched successfully for thinking-tag support")
 
-# ---------------------------------------------------------------------------
-# 6. Patch prompt_utils.py: load chat_template from the base (non-quantized)
-#    model's tokenizer_config.json when the quantized model is missing it.
-#    Also pass enable_thinking=True so the template appends <think>\n.
-# ---------------------------------------------------------------------------
 pu_path = "mlx_vlm/prompt_utils.py"
 pu_src = open(pu_path).read()
 
-# Inject a helper that fetches the chat template from the base model repo
-# on first use, caching it for subsequent calls.
 TEMPLATE_HELPER = '''
 import os as _os
 
@@ -410,11 +383,9 @@ def _ensure_chat_template(processor):
 
 '''
 
-# Insert the helper before the get_chat_template function
 assert "def get_chat_template(" in pu_src, "Cannot find get_chat_template in prompt_utils.py"
 pu_src = pu_src.replace("def get_chat_template(", TEMPLATE_HELPER + "def get_chat_template(", 1)
 
-# Now inject a call to _ensure_chat_template at the start of get_chat_template.
 old_template_check = '''    try:
         template_processor = None
         if (

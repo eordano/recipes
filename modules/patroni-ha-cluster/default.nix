@@ -1,17 +1,3 @@
-# patroni-ha-cluster
-#
-# An opinionated NixOS wrapper around the upstream `services.patroni` module for
-# running a PostgreSQL HA cluster whose etcd voting quorum lives in ONE region.
-# A member outside that region joins as a `nofailover` client so a WAN flap can
-# never lose quorum or trigger a spurious election, and a coexistence mode lets
-# Patroni share a host with an unrelated local PostgreSQL without fighting over
-# the runtime socket directory.
-#
-# All topology is passed in as plain module options -- there is no external
-# single-source-of-truth import, so this is a drop-in others can wire to their
-# own inventory (a NixOS flake's node list, terraform output, etc.).
-#
-# See README.md for the why, the traps, and a promotion runbook sketch.
 {
   config,
   lib,
@@ -21,7 +7,6 @@
 let
   cfg = config.modules.services.patroni-cluster;
 
-  # pg_hba scram rules for every trusted network CIDR the caller declares.
   networkHba = lib.concatMap (cidr: [
     "host replication ${cfg.replicationUsername} ${cidr} scram-sha-256"
     "host all all ${cidr} scram-sha-256"
@@ -30,8 +15,6 @@ in
 {
   options.modules.services.patroni-cluster = {
     enable = lib.mkEnableOption "Patroni PostgreSQL HA cluster node";
-
-    # ---- topology (pass these in from your own inventory) -------------------
 
     scope = lib.mkOption {
       type = lib.types.str;
@@ -187,8 +170,6 @@ in
       '';
     };
 
-    # ---- local instance ------------------------------------------------------
-
     disableSystemPostgresql = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -311,8 +292,6 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # In dedicated mode, take PostgreSQL entirely away from NixOS so only
-    # Patroni drives it.
     services.postgresql.enable = lib.mkIf cfg.disableSystemPostgresql (lib.mkForce false);
 
     services.patroni = {
@@ -341,20 +320,12 @@ in
         }
         // lib.optionalAttrs (cfg.replicatefrom != null) { inherit (cfg) replicatefrom; };
 
-        # WARNING: everything under bootstrap.* is written to the DCS ONCE, at
-        # cluster init. On a LIVE cluster editing this Nix does nothing -- change
-        # these with `patronictl edit-config`. See README.
         bootstrap = {
           dcs = {
             ttl = 30;
             loop_wait = 10;
-            # etcd3 client divides retry_timeout across hosts; keep it generous
-            # enough that one WAN hiccup can't expire a remote member's key
-            # (e.g. 20s over 3 etcd nodes ~ 6.7s/host).
             retry_timeout = 20;
             maximum_lag_on_failover = 1048576;
-            # A replica that loses the DCS keeps serving reads instead of
-            # demoting itself -- critical for a WAN-distant member.
             failsafe_mode = true;
             postgresql = {
               use_pg_rewind = true;
@@ -391,8 +362,6 @@ in
           ++ cfg.extraPgHba;
           inherit (cfg) basebackup;
           parameters = {
-            # Coexistence: move Patroni's socket off the default dir so it never
-            # collides with an unrelated local PostgreSQL on the same host.
             unix_socket_directories = if cfg.disableSystemPostgresql then "/run/postgresql" else "/run/patroni";
           }
           // cfg.extraPgParameters;
@@ -415,22 +384,10 @@ in
 
     systemd.services.patroni = {
       serviceConfig = {
-        # Keep systemd's RuntimeDirectory lifecycle aligned with the socket dir
-        # chosen above, so coexistence mode owns /run/patroni cleanly.
         RuntimeDirectory = if cfg.disableSystemPostgresql then "postgresql" else "patroni";
         StateDirectory = "patroni";
       };
 
-      # Patroni binds its REST API to nodeIp at startup. When that address lives
-      # on an overlay interface (WireGuard, Tailscale, a bridge brought up by
-      # another unit), it does not exist yet at the moment `network-online`
-      # fires, and the bind dies with EADDRNOTAVAIL. systemd then restarts into
-      # the same race until it hits the start limit and gives up for good --
-      # which looks like "Patroni is broken on this host" rather than "the
-      # overlay was five seconds late".
-      #
-      # Waiting for the address itself is the precise condition, and it does not
-      # care which technology supplies it.
       preStart = ''
         for _ in $(seq 1 ${toString cfg.nodeIpWaitSeconds}); do
           if ${pkgs.iproute2}/bin/ip -o addr show to ${cfg.nodeIp} 2>/dev/null | ${pkgs.gnugrep}/bin/grep -q .; then

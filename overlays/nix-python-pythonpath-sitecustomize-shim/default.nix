@@ -1,48 +1,9 @@
-# nix-python-pythonpath-sitecustomize-shim
-#
-# Patch a Nix-built Python application's runtime WITHOUT patching its source,
-# by injecting a `sitecustomize.py` onto the wrapper's PYTHONPATH. CPython
-# imports `sitecustomize` automatically at interpreter startup (before your app's
-# `main`), so any module you drop earliest on PYTHONPATH gets a free "run this
-# first" hook. This is the perfect seam for defensive monkeypatches that paper
-# over upstream version drift (e.g. a library got bumped in your nixpkgs but the
-# app pins an older API shape).
-#
-# It also shows the sibling trick: overriding a torch-family Python package's
-# `src` + `version` in an overlay so it builds against the torch that is actually
-# installed in your package set, instead of the stale version the package pins.
-#
-# This file is a self-contained example overlay. Replace the placeholders marked
-# `# EDIT:` with your own package and hashes. Everything else is the reusable
-# mechanism.
-
 {
-  # The package to patch. Pass your own derivation in; the default is a tiny
-  # placeholder so the file evaluates/parses standalone.
-  #
-  # In real use this is typically a Python app built via buildPythonApplication
-  # or a flake's `mkApp`, exposing a `$out/bin/<app>` wrapper script that sets
-  #   export PYTHONPATH='...'
-  # (the pythonRelaxDeps / makeWrapper style). We rewrite that one line.
   appName ? "myapp",
 }:
 
 final: prev:
 let
-  # -------------------------------------------------------------------------
-  # 1. The sitecustomize shim.
-  #
-  # `writeTextDir "sitecustomize.py" <body>` produces a store path that is a
-  # DIRECTORY containing exactly `sitecustomize.py`. Prepending that directory
-  # to PYTHONPATH makes CPython auto-import it at startup. Keep every patch in
-  # its own bare try/except so a shim failure can NEVER stop the app from
-  # booting -- a broken monkeypatch that crashes the interpreter is far worse
-  # than the bug it was trying to fix.
-  #
-  # The body below is a generic template. Swap `some_library` /
-  # `app.internal.module` / the patched function for whatever your version skew
-  # actually requires. The VALUE of this recipe is the injection seam, not this
-  # particular patch.
   compatShim = final.writeTextDir "sitecustomize.py" ''
     # Auto-imported by CPython at interpreter startup (it is on PYTHONPATH).
     # Each patch is isolated so a failure can never break application boot.
@@ -109,23 +70,6 @@ let
         pass
   '';
 
-  # -------------------------------------------------------------------------
-  # 2. (Optional) build a torch-family package against the INSTALLED torch.
-  #
-  # A package like torchaudio pins a specific torch version. If your nixpkgs
-  # ships a different torch, building torchaudio's pinned source against the
-  # installed torch's buildInputs fails (missing CUDA headers / ABI mismatch,
-  # e.g. `cusparse.h` not found). Fix by overriding torchaudio's src+version to
-  # MATCH the torch you actually have, while leaving `torch` itself untouched so
-  # triton/torch store paths don't fork.
-  #
-  # This is expressed as an extra Python-package overlay you can feed to a
-  # package builder, or apply directly to `pythonPackagesExtensions`. # EDIT: match your installed torch version.
-
-  # Placeholder base package so this overlay parses and evaluates standalone.
-  # In real use, REPLACE this with your actual app derivation -- e.g. one built
-  # from a flake input's builder, passing `audioPackageOverlay` into that
-  # builder's Python-package extensions so the torch fix lands in the closure.
   basePackage =
     prev.${appName} or (final.runCommand appName { } ''
       mkdir -p $out/bin
@@ -138,18 +82,6 @@ let
     '');
 in
 {
-  # -------------------------------------------------------------------------
-  # 3. Wire the shim onto the wrapper's PYTHONPATH via postFixup.
-  #
-  # The app's wrapper script contains a line like:
-  #     export PYTHONPATH='/nix/store/...-site-packages:...'
-  # We PREPEND the shim directory to it. `--replace-fail` (not `--replace`)
-  # is deliberate: if the wrapper's format ever changes and the anchor string
-  # is gone, the build FAILS LOUDLY instead of silently shipping without the
-  # shim. Adjust the anchor string to match your wrapper's exact quoting.
-  #
-  # Order matters: the shim dir must come FIRST so `sitecustomize.py` resolves
-  # to ours (and so any modules the shim ships shadow the app's).
   ${appName} = basePackage.overrideAttrs (old: {
     postFixup = (old.postFixup or "") + ''
       substituteInPlace $out/bin/${appName} \

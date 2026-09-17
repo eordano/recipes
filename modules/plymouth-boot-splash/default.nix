@@ -1,27 +1,3 @@
-# plymouth-boot-splash
-#
-# Two independent, opt-in flags for a desktop NixOS machine:
-#
-#   modules.bootConfig  -- systemd-boot on EFI, with the boot-time kernel
-#                         cmdline editor enabled.
-#   modules.plymouth    -- a graphical boot splash (Plymouth) that hides the
-#                         kernel/systemd log spam behind `quiet`.
-#
-# TRAP 1 (security): `systemd-boot.editor = true` exposes the boot-menu
-#   "e"-to-edit kernel command line. Anyone at the keyboard can append
-#   `init=/bin/sh` (or `rd.break`, `systemd.unit=...`) and get a root shell
-#   with no password -- a full local-root bypass of your login and disk
-#   policy. Only tolerable on a *physically trusted* desktop. On laptops,
-#   kiosks, servers, or anything that leaves your sight, set the editor to
-#   false (the default here).
-#
-# TRAP 2 (diagnosability): under `quiet` + Plymouth the early boot goes dark,
-#   which is exactly when a bad initrd (missing module, failed LUKS unlock,
-#   unfound root device) leaves you staring at a frozen logo with no clue.
-#   Keeping `initrd.verbose = true` lets the initrd stage still print, so
-#   early-boot failures stay visible while the splash only hides the later,
-#   less interesting log noise. It is a `mkDefault`, so a host can flip it.
-
 {
   lib,
   pkgs,
@@ -79,8 +55,6 @@ in
     themePackages = mkOption {
       type = types.listOf types.package;
       default = with pkgs; [
-        # A large third-party theme pack; override `selected_themes` to keep
-        # the closure small. Swap for any package that installs your theme.
         (adi1090x-plymouth-themes.override {
           selected_themes = [
             "square_hud"
@@ -119,12 +93,8 @@ in
           themePackages = cfg.plymouth.themePackages;
         };
 
-        # `quiet` hides the late kernel/systemd log spam behind the splash.
         kernelParams = [ "quiet" ];
 
-        # ...but keep the initrd talking so early-boot failures (LUKS, missing
-        # modules, no root device) remain diagnosable behind the logo.
-        # mkDefault so a host can still silence it deliberately.
         initrd.verbose = lib.mkDefault true;
       };
     })

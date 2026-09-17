@@ -1,15 +1,3 @@
-# grafana-matrix-alert-relay
-#
-# A tiny NixOS module that bridges Grafana's webhook contact point to a Matrix
-# room. Grafana can only POST JSON to a URL; the Matrix send API is
-# `PUT /_matrix/client/v3/rooms/{room}/send/m.room.message/{txn}` and needs a
-# caller-supplied transaction id Grafana cannot generate. This relay listens on
-# loopback, re-shapes each alert into a well-formed Matrix PUT, and uses a
-# deterministic (sha1-of-body, 5-minute bucket) transaction id so retries and
-# duplicate deliveries collapse server-side instead of spamming the room.
-#
-# Import it, set the options, and point a Grafana webhook contact point at
-# http://127.0.0.1:<port>/alert (any path works -- the relay accepts every POST).
 {
   config,
   lib,
@@ -171,15 +159,12 @@ in
         RELAY_PORT = toString cfg.port;
         MATRIX_BASE = cfg.matrixBase;
         MATRIX_ROOM = cfg.room;
-        # %d is the systemd credentials directory; see LoadCredential below.
         MATRIX_TOKEN_FILE = "%d/matrix-token";
       };
 
       serviceConfig = {
         Type = "simple";
         DynamicUser = true;
-        # Token is materialised into the per-unit credentials dir (0400, owned
-        # by the DynamicUser), readable at %d/matrix-token -- never in env/argv.
         LoadCredential = "matrix-token:${cfg.tokenFile}";
         ExecStart = "${pkgs.python3}/bin/python3 ${relayScript}";
         Restart = "on-failure";
@@ -195,10 +180,6 @@ in
         LockPersonality = true;
         SystemCallArchitectures = "native";
 
-        # Egress is left open (0.0.0.0/0) because the relay needs DNS plus the
-        # Matrix homeserver, and the token-gated room is the real security
-        # boundary -- a tighter allowlist buys little here. If you want
-        # per-hostname egress control, front it with an egress proxy instead.
         IPAddressDeny = "any";
         IPAddressAllow = [
           "127.0.0.0/8"

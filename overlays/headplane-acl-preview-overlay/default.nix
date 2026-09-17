@@ -1,38 +1,7 @@
-# headplane-acl-preview-overlay
-#
-# Swap an upstream web-UI package's stub / "coming soon" component for a
-# working local one via a `overrideAttrs` `postPatch`, WITHOUT forking the
-# upstream repo. Here the target is Headplane's ACL "preview" tab, whose
-# upstream renders a `<Construction />` placeholder; we drop in a real
-# client-side access-matrix component instead.
-#
-# The technique is generic. Any packaged JS/TS app that ships a placeholder
-# React (or Vue/Svelte) component can have it replaced this way as long as the
-# app is built FROM SOURCE inside the derivation (so a `postPatch` runs before
-# the bundler). The four moves below are the reusable pattern:
-#
-#   1. cp                -- drop your replacement component into the source tree
-#   2. sed insert import -- wire the new component into the page that renders it
-#   3. substituteInPlace -- swap the placeholder JSX for your component's JSX
-#   4. sed delete        -- remove the leftover "coming soon" prose so it does
-#                          not render alongside your component
-#
-# Import it as a nixpkgs overlay:
-#
-#   nixpkgs.overlays = [ (import ./headplane-acl-preview-overlay) ];
-#
-# The replacement component lives beside this file as
-# `acl-preview-component.tsx`; edit it to taste. The upstream source paths
-# (app/routes/acls/...) are Headplane-specific -- retarget them for your app.
-
 final: prev: {
   headplane = prev.headplane.overrideAttrs (old: {
-    # gnused is needed for the in-place line insert/delete. Some upstream
-    # builders already have it; appending is safe either way.
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ final.gnused ];
 
-    # Append to any existing postPatch rather than clobbering it -- the
-    # upstream package may already patch its own sources.
     postPatch = (old.postPatch or "") + ''
       # 1. Copy the replacement component into the app source tree.
       cp ${./acl-preview-component.tsx} app/routes/acls/acl-preview.tsx

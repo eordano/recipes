@@ -1,18 +1,3 @@
-# samba-shared-folder -- a single declarative SMB share, with imperative
-# passwords bridged in via a guarded oneshot.
-#
-# NixOS can declare a Samba share fully, but it CANNOT declare SMB passwords:
-# smbpasswd writes to an on-disk passdb (tdb) at runtime, there is no
-# `services.samba.users.<name>.password` knob. This module bridges that gap.
-#
-# Import it into a host config and set at least one smbUser:
-#
-#   modules.services.shared-folder = {
-#     enable = true;
-#     smbUsers.alice.passwordFile = "/run/secrets/alice-smb";
-#   };
-#
-# See README.md for the two traps this pattern exists to work around.
 {
   config,
   lib,
@@ -123,16 +108,11 @@ in
     services.samba = {
       enable = true;
       inherit (cfg) openFirewall;
-      # No NetBIOS name service: clients connect by hostname/IP, not by
-      # browsing the "network neighborhood".
       nmbd.enable = false;
       settings = {
         global = {
           inherit (cfg) workgroup;
           security = "user";
-          # Map unknown users to guest, then reject them (guest ok = no on the
-          # share). Net effect: bogus usernames get no password prompt AND no
-          # access -- the mapping suppresses the prompt, the share denies guests.
           "map to guest" = "Bad User";
           "server string" = "${config.networking.hostName} Shared Folder";
         }
@@ -153,11 +133,6 @@ in
       };
     };
 
-    # NixOS has no declarative SMB passwords, so bridge the imperative
-    # smbpasswd with a oneshot. Idempotency comes from the `pdbedit -L` guard:
-    # a user already in the passdb is left alone, so this runs at most once per
-    # user. That also means rotating a passwordFile does NOT re-set a live
-    # password -- see README for how to force a reset.
     systemd.services.setup-smb-passwords = mkIf (cfg.smbUsers != { }) {
       description = "Set up Samba passwords from secret files";
       after = [ "samba-smbd.service" ];

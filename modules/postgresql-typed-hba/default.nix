@@ -18,13 +18,8 @@ let
     mapAttrsToList
     ;
 
-  # `lib.mkDefault` is `mkOverride 1000`; anything the operator sets themselves
-  # lands at 100. A package still sitting at 1000 is upstream's
-  # stateVersion-derived default, not a deliberate pin.
   mkDefaultPriority = 1000;
 
-  # Render one pg_hba.conf line from a typed rule. 'local' rules omit the
-  # address column; everything else requires it (enforced by assertion below).
   formatAuthRule =
     _: rule:
     let
@@ -63,11 +58,6 @@ let
       mapAttrsToList (systemUser: pgUser: "${mapName} ${systemUser} ${pgUser}") rules
     );
 
-  # Default pg_hba rules. Names are prefixed with a numeric sort key because the
-  # final file is emitted in sorted-name order (first match wins in pg_hba, so
-  # order is load-bearing). These let a local `root` reach the `postgres`
-  # superuser via peer auth + the superuser_map ident mapping. Override any of
-  # them by name, or set the entry to `null` to drop it entirely.
   defaultAuthRules = {
     "45-local-root-as-postgres" = {
       type = "local";
@@ -295,8 +285,6 @@ in
 
     services.postgresql = {
       enable = mkDefault true;
-      # Any host-based rule implies we must listen on TCP/IP, so flip it on
-      # automatically (the assertion above is the belt-and-braces backstop).
       enableTCPIP = mkDefault (
         lib.any (rule: rule != null && rule.type != "local") (lib.attrValues cfg.authRules)
       );
@@ -321,12 +309,6 @@ in
       );
     };
 
-    # Post-init SQL runs from a oneshot ordered AFTER postgresql-setup but
-    # BEFORE postgresql.target. Anything that waits on postgresql.target (via
-    # `after = [ "postgresql.target" ]`) therefore sees a fully provisioned
-    # database -- extensions created, grants applied -- instead of racing the
-    # server's bare readiness. This is the fix for the classic race where a
-    # consumer starts before its extensions/grants exist.
     systemd.services.postgresql-custom-setup =
       let
         postgresqlPkg = config.services.postgresql.package;

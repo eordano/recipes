@@ -1,14 +1,3 @@
-# mesh-node-reassociate -- re-point a coordination-server node record at a
-# specific overlay address (and optionally rename it) by editing the control
-# plane's sqlite database directly.
-#
-# Configuration comes from the environment so the module wrapper can pin it:
-#   MESH_CP_DB          sqlite database of the coordination server
-#   MESH_CP_SERVICE     systemd unit to stop/start around the edit
-#   MESH_CP_CLI         command used to probe the server's health afterwards
-#   MESH_ADDR_PREFIXES  comma-separated address prefixes accepted by --to-ip
-#   MESH_NODE_RESTART   command run over ssh to make the node re-poll
-
 set -euo pipefail
 
 DB="${MESH_CP_DB:-/var/lib/headscale/db.sqlite}"
@@ -109,10 +98,6 @@ done
 sql_stdin() { sqlite3 "$DB"; }
 sql_ro() { sqlite3 -readonly "$DB" "$@"; }
 
-# The schema this tool understands: one row per node, with separate ipv4/ipv6
-# columns and a mutable given_name. Older coordination servers kept addresses
-# in a single serialised column under a differently named table; refuse those
-# loudly instead of writing nonsense into them.
 cols="$(sql_ro "SELECT ',' || group_concat(name) || ',' FROM pragma_table_info('nodes');")"
 [ -n "$cols" ] || die "unexpected schema: $DB has no 'nodes' table -- this tool targets a control plane that stores one row per node with per-address columns"
 for c in id given_name ipv4 ipv6; do
@@ -141,9 +126,6 @@ is_ipv4() {
   return 0
 }
 
-# Guard rail: only accept addresses inside the overlay range. Without it a
-# typo silently points a node at a public address and the control plane will
-# happily serve that in the netmap.
 in_overlay() {
   local p rest
   if [ -z "$PREFIXES" ]; then return 0; fi
@@ -166,8 +148,6 @@ fi
 if [ -n "$to_name" ]; then safe_name "$to_name" || die "--to-name '$to_name' has unexpected characters"; fi
 if [ -n "$to_ipv6" ]; then [[ "$to_ipv6" =~ ^[0-9a-fA-F:]+$ ]] || die "--to-ipv6 '$to_ipv6' is not an IPv6 address"; fi
 
-# Resolve the source node -- exactly one. Every selector is validated before it
-# reaches the SQL text, because these are interpolated, not bound.
 sel=""
 if [ -n "$from_id" ]; then
   [[ "$from_id" =~ ^[0-9]+$ ]] || die "--from-id must be numeric"
@@ -190,9 +170,6 @@ node_id="${hits[0]}"
 read -r cur_name cur_ip4 cur_ip6 < <(sql_ro -cmd '.mode list' -cmd '.separator " "' \
   "SELECT given_name, ipv4, ipv6 FROM nodes WHERE id = $node_id;")
 
-# Find the shadow: whatever record currently squats on the target address or
-# name. That is normally the node's own earlier registration, left behind when
-# it came back with a fresh machine key.
 conflict_id=""
 conflict_desc=""
 conflict_ip6=""
@@ -249,9 +226,6 @@ fi
 
 [ "$(id -u)" -eq 0 ] || die "must run as root (needs to stop/start $SERVICE and write $DB)"
 
-# Stop first, back up second. A running server holds recent writes in the -wal
-# sidecar, so copying the main database file underneath it can capture a state
-# that never existed. `.backup` after the stop takes a consistent snapshot.
 echo "stopping $SERVICE ..."
 systemctl stop "$SERVICE"
 
@@ -289,7 +263,6 @@ if [ -n "$to_ip" ]; then
   [ "$holders" = "1" ] || die "post-check: $holders nodes hold $to_ip (expected 1); backup at $backup"
 fi
 
-# The node keeps using its old address until it polls the control plane again.
 if [ -n "$to_ip" ]; then
   if [ -n "$node_ssh" ]; then
     echo "restarting the mesh agent on the node ($node_ssh) ..."

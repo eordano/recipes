@@ -1,22 +1,3 @@
-# dns-connectivity-probe
-#
-# A hardened long-running systemd probe that dig+pings a list of targets every
-# few seconds and appends timestamped log lines. When resolution or reachability
-# flaps intermittently, a later `grep` of the log pins down exactly when it broke.
-#
-# Two things are deliberate and load-bearing:
-#
-#   1. logrotate uses `copytruncate`. The probe is a long-running loop that holds
-#      the log open with `>>` and never reopens on SIGHUP. A normal
-#      rename-and-reopen rotation would leave it writing to the now-unlinked old
-#      inode forever, so the "current" log would stop growing. copytruncate
-#      copies the file out and truncates the original in place, keeping the same
-#      inode the probe is holding.
-#
-#   2. The service can be ordered *after* a local resolver, so its first queries
-#      aren't spurious failures during boot. Set `resolverService` to the unit
-#      name of your resolver (e.g. "dnsmasq.service", "unbound.service") and the
-#      probe will `wants`/`after` it.
 {
   config,
   lib,
@@ -155,8 +136,6 @@ in
         Restart = "always";
         RestartSec = "10s";
         DynamicUser = true;
-        # Derived from logDir so the probe's LOGS_DIRECTORY and logrotate's
-        # target can never drift onto different paths.
         LogsDirectory = lib.removePrefix "/var/log/" cfg.logDir;
 
         NoNewPrivileges = true;
@@ -179,8 +158,6 @@ in
       };
     };
 
-    # copytruncate is mandatory here -- see the header comment. The probe holds
-    # the log open with `>>` and never reopens, so rotation must keep the inode.
     services.logrotate.settings.dns-connectivity-probe = {
       files = "${cfg.logDir}/queries.log";
       frequency = "hourly";

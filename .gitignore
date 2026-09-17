@@ -15,3 +15,7 @@
 # local Python test/generator artifacts
 **/__pycache__/
 *.pyc
+
+# nix build output links
+result
+result-*

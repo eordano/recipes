@@ -1,18 +1,3 @@
-# pgAdmin in a private-network NixOS container that reaches the host
-# PostgreSQL over a bind-mounted /run/postgresql Unix socket (no TCP).
-#
-# Import this file as a NixOS module, then set e.g.:
-#
-#   modules.services.pgadmin = {
-#     enable       = true;
-#     domain       = "pgadmin.example.com";
-#     passwordFile = "/run/secrets/pgadmin-initial-password";
-#     operatorUser = "alice";   # optional: human who may read dataDir
-#   };
-#
-# The `passwordFile` should be provisioned out-of-band (sops-nix, agenix,
-# a systemd credential, etc.) -- this module never bakes secrets into the store.
-
 {
   config,
   lib,
@@ -23,9 +8,6 @@ with lib;
 let
   cfg = config.modules.services.pgadmin;
 
-  # The container must speak the SAME PostgreSQL client version as the host
-  # server, otherwise protocol / catalog mismatches surface as confusing
-  # connection errors. Pin the container's package to whatever the host runs.
   hostPostgresPackage = config.services.postgresql.package;
 in
 {
@@ -130,7 +112,6 @@ in
   };
 
   config = mkIf cfg.enable (mkMerge [
-    # --- Optional nginx reverse proxy ------------------------------------
     (mkIf (cfg.enableNginx && cfg.domain != null) {
       services.nginx.enable = true;
       services.nginx.virtualHosts.${cfg.domain} = mkMerge [
@@ -148,7 +129,6 @@ in
       ];
     })
 
-    # --- Core: the container + socket wiring ------------------------------
     {
       assertions = [
         {
@@ -165,8 +145,6 @@ in
         }
       ];
 
-      # The host socket dir must exist before the container starts, or pgAdmin
-      # boots unable to connect. Order the container after PostgreSQL.
       systemd.services."container@pgadmin" = {
         after = [ "postgresql.service" ];
         requires = [ "postgresql.service" ];
@@ -185,13 +163,10 @@ in
             inherit (cfg) port;
             openFirewall = true;
             settings = {
-              # Bind the veth, not just loopback -- otherwise the host-side
-              # nginx proxy at localAddress:port gets connection-refused.
               DEFAULT_SERVER = "0.0.0.0";
             };
           };
 
-          # Match the host server's client libraries exactly.
           services.postgresql.package = hostPostgresPackage;
 
           system.stateVersion = "24.11";
@@ -200,16 +175,12 @@ in
         };
 
         bindMounts = {
-          # Web login secret.
           "${cfg.passwordFile}" = {
             hostPath = cfg.passwordFile;
           };
-          # Persistent pgAdmin state.
           "${cfg.dataDir}" = {
             hostPath = cfg.dataDir;
           };
-          # The load-bearing bit: the host's PostgreSQL Unix socket dir.
-          # pgAdmin connects over this socket instead of TCP.
           "/run/postgresql" = {
             hostPath = "/run/postgresql";
             isReadOnly = false;
@@ -217,13 +188,6 @@ in
         };
       };
 
-      # Do NOT blanket-trust the container's veth. The only traffic the
-      # container legitimately originates toward the host is DNS to the host
-      # resolver (see `networking.nameservers` above); allow just that. The
-      # nginx proxy -> pgAdmin path is host-initiated, so its return packets are
-      # already accepted as an established connection and need no extra rule.
-      # Narrowing this means a compromised pgAdmin cannot reach arbitrary
-      # host-bound services (metrics, ssh, other admin ports) over the veth.
       networking.firewall.interfaces."ve-pgadmin" = {
         allowedUDPPorts = [ 53 ];
         allowedTCPPorts = [ 53 ];
@@ -244,9 +208,6 @@ in
         "d ${cfg.dataDir} 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
       ];
 
-      # Optional: idempotently create/refresh a login role in the host DB.
-      # Runs as `postgres` over the local socket, before the container starts,
-      # once PostgreSQL is accepting connections.
       systemd.services.pgadmin-postgres-setup = mkIf cfg.createUser {
         description = "Provision PostgreSQL login role for pgAdmin";
         wantedBy = [ "multi-user.target" ];

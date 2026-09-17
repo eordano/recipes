@@ -1,35 +1,3 @@
-# egress-filter -- confine an interface to a DNS-name allowlist
-#
-# Problem: you have a VM bridge or container network and you want to allow the
-# guests behind it to reach *only* a named set of domains -- but a firewall
-# matches IP addresses, not names, and the IPs behind a name rotate.
-#
-# Two strategies, both landing in the same per-interface ipset that a FORWARD
-# chain gates on:
-#
-#   resolve mode  -- a timer periodically re-resolves the domains and rebuilds
-#                   the ipset. Simple, but blind to IP rotations that happen
-#                   between polls.
-#
-#   dnsmasq mode  -- a per-interface dnsmasq is the guests' only resolver; it
-#                   writes each freshly-answered IP into the ipset the instant
-#                   it resolves, and port 53 is DNATed to it so a guest cannot
-#                   bypass interception by talking to an outside resolver.
-#
-# Key trap handled below: in resolve mode the ipset is rebuilt in a *temporary*
-# set and atomically `ipset swap`ped into place, so the live FORWARD chain never
-# matches against a half-built allowlist.
-#
-# Backends: works on both `networking.firewall.backend = "iptables"` (via
-# ipset + iptables, described above) and `"nftables"` (a native translation --
-# its own self-managed table, `nftset=` in place of `ipset=`, `nft -f` as the
-# atomic-rebuild primitive in place of `ipset swap`). See the "nftables
-# backend" comment block below (just above `enabledInterfaces`) and the
-# README for that design.
-#
-# This is a self-contained NixOS module. Import it and configure
-# `services.egressFilter`. Nothing here is host- or site-specific.
-
 {
   config,
   lib,
@@ -51,9 +19,6 @@ let
   sort = "${pkgs.coreutils}/bin/sort";
   paste = "${pkgs.coreutils}/bin/paste";
 
-  # nftables backend. See the "nftables backend" block below (right above
-  # `enabledInterfaces`) for the design and the big comment explaining why
-  # a native port is possible and how it stays safe.
   nft = config.networking.firewall.backend == "nftables";
   nftBin = "${pkgs.nftables}/bin/nft";
   nftTable = "egress-filter";
@@ -265,16 +230,6 @@ let
     in
     concatMapStringsSep "\n" (domain: "ipset=/${domain}/${ipsetSpec}") interface.domains;
 
-  # nftables equivalent of mkDnsmasqIpsetConfig. dnsmasq 2.93 (HAVE_NFTSET)
-  # writes each freshly-answered IP straight into an nftables set via
-  # --nftset=/<domain>/<sel>#<family>#<table>#<set>, where <sel> is "4" or
-  # "6" (restricts which record type feeds that set spec) and <family> is
-  # nft's own table family (here always "inet", since this module's table
-  # is family inet). Verified against the real pinned dnsmasq: `dnsmasq
-  # --test` accepts this exact directive, and dnsmasq's nftset.c builds
-  # the in-process command as literally `add element <family> <table>
-  # <set> { <ip> }` after splitting on '#' -- i.e. it ends up running
-  # precisely the nft command this spec names, nothing more exotic.
   mkDnsmasqNftsetConfig =
     name: interface:
     let
@@ -531,67 +486,12 @@ let
       ''}
     '';
 
-  # ---------------------------------------------------------------------
-  # nftables backend
-  #
-  # nixpkgs' nftables-based firewall (firewall-nftables.nix) hard-asserts
-  # networking.firewall.extraCommands/extraStopCommands == "" -- this
-  # module's per-interface FORWARD gating, ipsets, and (in dnsmasq mode)
-  # the DNS DNAT redirect can't be driven through them on that backend.
-  # Two primitives, both checked against real binaries/kernel state (not
-  # just `nft -c` syntax-checked) rather than assumed, make a faithful,
-  # atomic port possible:
-  #
-  #   1. dnsmasq (2.93, compiled with HAVE_NFTSET) writes each freshly-
-  #      answered IP straight into an nftables set (mkDnsmasqNftsetConfig
-  #      above) -- verified with `dnsmasq --test` and by reading nftset.c.
-  #   2. `nft -f <file>` applies its whole contents as ONE atomic netlink
-  #      transaction. In resolve mode this replaces the ipset-swap trick:
-  #      a file containing `flush set ...` followed by every
-  #      `add element ...` is submitted in a single `nft -f` call, so the
-  #      live enforcement chain never matches a half-rebuilt set -- this
-  #      exact sequence was applied against a real (network-namespaced)
-  #      nft/kernel instance during development, including a simulated
-  #      "redeploy" (chain teardown+rebuild) between two rebuilds, to
-  #      confirm the set survives untouched.
-  #
-  # This module keeps its own table (family inet, name "egress-filter")
-  # OUTSIDE `networking.nftables.tables`: like fail2ban-ipset-geoip-
-  # cloudflare, this module's whole point is dynamic state (the per-
-  # interface allow-sets, populated over time by the resolve-mode timer
-  # and/or the live dnsmasq interceptor), and networking.nftables.tables
-  # deletes+recreates every declared table on every nftables.service
-  # reload -- wiping that state and reopening exactly the polling/
-  # interception gap this module exists to close. So:
-  #   * table + per-interface sets: idempotent `nft add table`/`add set`
-  #     (never flushed by setup or teardown), run from this module's own
-  #     systemd unit -- survives redeploys and nftables.service reloads.
-  #   * the *enforcement* chains (forward-hook per-interface gating, and
-  #     the nat-hook DNS DNAT) are pure functions of static config -- safe
-  #     to `delete chain` + rebuild from scratch on every run, exactly
-  #     like fail2ban's enforcing "input" chain. The dispatcher chains are
-  #     deleted before the chains they jump to, so deleting an
-  #     unreferenced per-interface chain never fails on a live jump.
-  #
-  # Known residual gaps (see the README, "nftables backend", for detail):
-  #   * networking.nftables.flushRuleset (on by default for hosts with
-  #     stateVersion < 23.11) makes nftables.service issue `flush ruleset`
-  #     on every start/reload, wiping this table -- including the dynamic
-  #     allow-sets -- until this module's own unit next runs.
-  #   * disabling services.egressFilter entirely removes this module's
-  #     systemd unit from the config, so only its *old* ExecStop (chain-
-  #     only teardown) ever runs; the table and its sets are never
-  #     deleted and linger until an operator runs
-  #     `nft delete table inet egress-filter` by hand.
   isV6Addr = ip: hasInfix ":" ip;
   nftStaticV4 = interface: interface.allowedIPv4 ++ filter (ip: !(isV6Addr ip)) interface.allowedIPs;
   nftStaticV6 = interface: interface.allowedIPv6 ++ filter isV6Addr interface.allowedIPs;
 
   nftForwardChain = name: "egress_fwd_${name}";
 
-  # Idempotent -- create-if-missing, never flush. Safe to run redundantly
-  # from more than one unit (mirrors createInitialIpsets/mkResolveScript's
-  # own belt-and-suspenders `ipset create -exist`).
   nftEnsureSetsCommands = name: _interface: ''
     ${nftBin} add table inet ${nftTable}
     ${nftBin} add set inet ${nftTable} ${ipsetName name} '{ type ipv4_addr; flags interval; }'
@@ -600,9 +500,6 @@ let
     ''}
   '';
 
-  # Idempotent element adds -- never flushes, so this can never wipe
-  # entries the resolve-mode timer or the live dnsmasq interceptor
-  # already wrote into the same set.
   nftStaticIpsCommands =
     name: interface:
     let
@@ -626,11 +523,6 @@ let
       echo "Static IPs added for ${name} (nftables)"
     '';
 
-  # Resolve-mode nftables equivalent of mkResolveScript. Identical domain/
-  # CNAME resolution to the iptables path; the only difference is the
-  # atomic-rebuild mechanism (`nft -f` transaction instead of `ipset
-  # swap`) -- see the header comment above for why that is an equivalent
-  # (and separately-verified) guarantee.
   mkNftResolveScript =
     name: interface:
     pkgs.writeShellScript "egress-resolve-nft-${name}" ''
@@ -702,14 +594,6 @@ let
       echo "Egress filter for ${name} updated (nftables)"
     '';
 
-  # Per-interface FORWARD-hook chain: same rule content and ORDER as
-  # generateIptablesRules -- established-first, DNS handling, private-net
-  # accepts, allow-set lookup, drop-last -- merged into one chain per
-  # interface. An inet-family table can match `ip`/`ip6` fields side by
-  # side in the same chain, so unlike the iptables/ip6tables pair below
-  # there's no need to duplicate the whole chain per protocol; only the
-  # v6-specific DNS-bypass guard (see isDnsmasqRedirect below) needs an
-  # explicit family qualifier.
   nftForwardChainCommands =
     name: interface:
     let
@@ -730,11 +614,6 @@ let
             ${nftBin} add rule inet ${nftTable} ${chain} ip daddr ${listenAddr} udp dport ${dnsPort} accept
             ${nftBin} add rule inet ${nftTable} ${chain} ip daddr ${listenAddr} tcp dport ${dnsPort} accept
           ''
-          # No v6 DNAT target exists (the dnsmasq listener is v4-only), so
-          # a v6 DNS query's destination is never rewritten. Drop it
-          # explicitly, and BEFORE the allow-set lookup below: otherwise a
-          # guest could bypass interception entirely by querying an
-          # already-allowed domain's own IPv6 address on port 53.
           + optionalString ipv6Enabled ''
             ${nftBin} add rule inet ${nftTable} ${chain} meta nfproto ipv6 udp dport 53 drop
             ${nftBin} add rule inet ${nftTable} ${chain} meta nfproto ipv6 tcp dport 53 drop
@@ -782,9 +661,6 @@ let
       ${nftBin} add rule inet ${nftTable} fwd_dispatch iifname "${name}" jump ${nftForwardChain name}
     '';
 
-  # (Re)builds everything: idempotent table/sets first (protected dynamic
-  # state -- see the header comment), then a from-scratch rebuild of the
-  # derived-only nat/forward enforcement chains.
   nftSetupScript = pkgs.writeShellScript "egress-filter-nftables-setup" ''
     set -euo pipefail
     NFT=${nftBin}
@@ -805,12 +681,6 @@ let
     ${concatStringsSep "\n" (mapAttrsToList nftDispatchCommand enabledInterfaces)}
   '';
 
-  # Removes only the enforcement chains -- the table and its allow-sets
-  # (dynamic state) are left alone, exactly like fail2ban-ipset-geoip-
-  # cloudflare's teardown only touching its enforcing "input" chain. This
-  # unit can restart (e.g. because its own script content changed across
-  # a redeploy) without ever wiping the resolve-mode/dnsmasq-populated
-  # entries.
   nftTeardownScript = pkgs.writeShellScript "egress-filter-nftables-teardown" ''
     ${nftBin} delete chain inet ${nftTable} fwd_dispatch 2>/dev/null || true
     ${concatStringsSep "\n" (mapAttrsToList nftDeleteForwardChainCommand enabledInterfaces)}
@@ -870,14 +740,6 @@ in
   };
 
   config = mkIf (cfg.enable && enabledInterfaces != { }) {
-    # No blanket "nftables unsupported" assertion any more: the nftables
-    # backend now has a native implementation (see the big comment above
-    # `enabledInterfaces`) covering every mode -- resolve, dnsmasq,
-    # dnsmasq+redirectDNS, static IPs, private-network passthrough, and
-    # IPv6 -- so there is no remaining path that needs one. The two
-    # residual gaps that couldn't be fully closed (networking.nftables.
-    # flushRuleset, and no table cleanup when the feature is disabled
-    # outright) are flagged below / in the README instead of blocked on.
     warnings = optional (nft && (config.networking.nftables.flushRuleset or false)) ''
       services.egressFilter is enabled on the nftables backend, and
       networking.nftables.flushRuleset is true. Every start or reload of
@@ -905,12 +767,6 @@ in
 
     networking.firewall.extraPackages = [ pkgs.ipset ];
 
-    # iptables backend only -- byte-identical to the pre-nftables-port
-    # version of this module. The nftables backend hard-asserts these two
-    # options are empty strings, so they must resolve to "" on that
-    # backend; see the egress-filter-nftables systemd unit below (built
-    # from the big nftables-backend `let` block above) for its
-    # replacement.
     networking.firewall.extraCommands = optionalString (!nft) ''
       ${concatStringsSep "\n" (mapAttrsToList createInitialIpsets enabledInterfaces)}
 
@@ -921,20 +777,7 @@ in
       ${concatStringsSep "\n" (mapAttrsToList cleanupRules enabledInterfaces)}
     '';
 
-    # systemd.services is assembled as one merged expression (rather than a
-    # separate `systemd.services.egress-filter-nftables = ...;` dotted
-    # assignment alongside this) -- Nix's attrset-literal merging of
-    # sibling dotted paths only works when every sibling definition is
-    # itself a literal attrset the parser can descend into; the
-    # mapAttrs'-built pieces below are function-call results, not
-    # literals, so mixing a dotted path in would hit "attribute already
-    # defined" instead of merging.
     systemd.services =
-      # nftables backend only -- (re)builds the self-managed
-      # "egress-filter" table: idempotent table/set creation (protected
-      # dynamic state) plus a from-scratch rebuild of the derived-only
-      # enforcement chains. See the big comment above `enabledInterfaces`
-      # for the full design and its accepted residual gaps.
       (optionalAttrs nft {
         egress-filter-nftables = {
           description = "egress-filter nftables table (per-interface allow-sets + forward/nat enforcement chains)";
@@ -957,12 +800,6 @@ in
         name: interface:
         nameValuePair "egress-filter-resolve-${name}" {
           description = "Resolve domains for egress filter on ${name}";
-          # iptables: after firewall.service (the unit that runs
-          # createInitialIpsets/generateIptablesRules). nftables: after
-          # egress-filter-nftables.service instead -- there is no
-          # firewall.service unit at all on that backend (it's an
-          # iptables-only unit from firewall-iptables.nix), and this
-          # module's table/chains come from its own unit there.
           after = [
             "network-online.target"
           ]

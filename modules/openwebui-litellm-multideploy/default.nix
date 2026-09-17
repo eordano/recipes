@@ -1,23 +1,3 @@
-# openwebui-litellm-multideploy
-#
-# One option set that fronts Open WebUI (over an OpenAI-compatible backend such
-# as LiteLLM) behind nginx TLS, in one of three interchangeable ways:
-#
-#   deploymentMethod = "docker"          OCI container via virtualisation.oci-containers
-#                    | "nixos-container" declarative NixOS container, private network
-#                    | "systemd"         native systemd service (needs pkgs.open-webui)
-#
-# The host-side user/group, data directory layout, and nginx vhost are shared
-# across all three; only the runtime wrapper differs.
-#
-# Traps this module bakes in (see README):
-#   - the nginx "/" location deliberately does NOT re-set the Host header
-#   - under docker / nixos-container the vector store + static dir live INSIDE
-#     the container and are lost on recreate unless you add mounts
-#   - ~10 of the typed feature toggles are decorative; real features go through
-#     extraEnvironment
-#
-# Import it and set config.services.openwebuiMulti.* .
 {
   config,
   lib,
@@ -46,9 +26,6 @@ let
     CHROMA_DATA_PATH = "${cfg.dataDir}/vector_db";
     CHROMA_PERSIST_DIRECTORY = "${cfg.dataDir}/vector_db";
 
-    # Security-relevant account policy: wired so the typed toggles actually take
-    # effect. Defaults match Open WebUI's own defaults, so this changes nothing
-    # unless you set the options. extraEnvironment still merges last and wins.
     ENABLE_SIGNUP = boolToString cfg.enableSignup;
     DEFAULT_USER_ROLE = cfg.defaultUserRole;
   }
@@ -162,8 +139,6 @@ in
       description = "GID for the openwebui service group.";
     };
 
-    # --- docker ---------------------------------------------------------------
-
     containerBackend = mkOption {
       type = types.enum [
         "docker"
@@ -195,8 +170,6 @@ in
       '';
     };
 
-    # --- nixos-container ------------------------------------------------------
-
     containerNetwork = mkOption {
       type = types.submodule {
         options = {
@@ -225,8 +198,6 @@ in
       description = "Resolvers configured inside the nixos-container.";
     };
 
-    # --- backend (OpenAI-compatible, e.g. LiteLLM) ----------------------------
-
     backendHost = mkOption {
       type = types.nullOr types.str;
       default = null;
@@ -247,10 +218,6 @@ in
         extraEnvironment with an *_FILE variable or an EnvironmentFile instead.
       '';
     };
-
-    # --- decorative typed toggles (declared, NOT wired -- see README) ----------
-    # Kept for API compatibility / documentation. Setting them does nothing;
-    # drive the real features through extraEnvironment.
 
     embeddingEngine = mkOption {
       type = types.enum [
@@ -389,9 +356,6 @@ in
             if cfg.deploymentMethod == "nixos-container" then cfg.containerNetwork.localAddress else "127.0.0.1"
           }:${toString cfg.port}";
           proxyWebsockets = true;
-          # NOTE: do NOT add `proxy_set_header Host ...` here.
-          # recommendedProxySettings already forwards Host; a second Host header
-          # is a duplicate that uvicorn rejects with 400 "Invalid HTTP request".
           extraConfig = ''
             proxy_connect_timeout 600;
             proxy_send_timeout 600;
@@ -415,10 +379,6 @@ in
         containers.openwebui = {
           inherit (cfg) image imageFile;
           environment = commonEnvironment;
-          # WARNING: only data/ and cache/ are mounted. CHROMA_DATA_PATH and
-          # STATIC_DIR still point at unmounted host paths, so the vector store
-          # and static assets land inside the container and are lost on
-          # recreate. Add volumes for them if you rely on RAG persistence.
           volumes = [
             "${cfg.dataDir}/data:/app/backend/data"
             "${cfg.dataDir}/cache:/app/backend/cache"
@@ -427,8 +387,6 @@ in
             "127.0.0.1:${toString cfg.port}:${toString cfg.port}"
           ];
           extraOptions = [
-            # lets the container reach a host-local backend (LiteLLM) as
-            # host.docker.internal
             "--add-host=host.docker.internal:host-gateway"
           ];
         };
@@ -480,8 +438,6 @@ in
               ];
 
               serviceConfig = sharedServiceConfig // {
-                # Same trap as docker: only /data and /cache are bind-mounted
-                # back to the host; /static and /vector_db stay in the container.
                 ReadWritePaths = [
                   "/data"
                   "/cache"
@@ -526,8 +482,6 @@ in
           coreutils
         ];
 
-        # Only the systemd method persists EVERYTHING: the whole tree is
-        # writable, so the vector store and static dir survive.
         serviceConfig = sharedServiceConfig // {
           WorkingDirectory = cfg.dataDir;
           ReadWritePaths = [

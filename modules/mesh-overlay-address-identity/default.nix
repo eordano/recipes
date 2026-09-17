@@ -1,26 +1,3 @@
-# mesh-overlay-address-identity
-#
-# Keep a declarative "name -> overlay address" map honest against the live mesh,
-# and repair the control plane when a node re-registers under a new address.
-#
-# Two tools, one problem:
-#
-#   * mesh-address-drift-check -- a pre-commit reconciler. It compares the map
-#     file in your repo against the live netmap, blocks on address reuse and on
-#     re-registration duplicates, and auto-appends genuinely new devices above a
-#     marker comment so the map cannot rot silently.
-#
-#   * mesh-node-reassociate -- a repair tool for the coordination host. A control
-#     plane that allocates addresses sequentially cannot hand a re-registering
-#     node its old address back, so the only way to restore the canonical
-#     address the rest of the fleet pins is a direct database edit. This wraps
-#     that edit safely: stop, snapshot, single transaction, restart,
-#     health-check, post-check, then nudge the node to re-poll.
-#
-# The map itself is an option here (`addresses`/`aliases`/`ignore`) so other
-# modules can consume it, but the file of record lives in your repository: the
-# pre-commit hook has to be able to append to it.
-
 {
   config,
   lib,
@@ -64,8 +41,6 @@ let
   hostNames =
     name: [ name ] ++ lib.optional (cfg.hostAliases.domain != null) "${name}.${cfg.hostAliases.domain}";
 
-  # networking.hosts is keyed by address, the map by name; several names may
-  # legitimately share one address, so merge rather than overwrite.
   byAddress = lib.foldlAttrs (
     acc: name: addr:
     acc // { ${addr} = (acc.${addr} or [ ]) ++ hostNames name; }

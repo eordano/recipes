@@ -1,30 +1,3 @@
-# jaeger-oci-tracing
-#
-# Run Jaeger distributed tracing as an OCI/Docker container behind nginx.
-#
-# The pattern, and the two traps it defends against:
-#
-#   1. Split the surface. Only the Jaeger UI (16686) is proxied through nginx
-#      for TLS; its container port is published on 127.0.0.1 so it is never
-#      reachable as raw plaintext HTTP. The OTLP ingest ports (4317 gRPC, 4318
-#      HTTP) are published on `otlpListenAddress` (loopback by default) so
-#      collectors reach the container directly. Those ports are UNAUTHENTICATED
-#      -- point `otlpListenAddress` at a trusted-network interface (VPN /
-#      private subnet) to reach them remotely. Do not expose them to the public
-#      internet. NOTE: Docker publishes ports via a DNAT rule in the DOCKER
-#      iptables chain that BYPASSES the NixOS firewall INPUT chain, so exposure
-#      is controlled by the publish bind address, not by `openFirewall`.
-#
-#   2. Order the docker network before the container. The container joins a
-#      named docker network; if the `docker-network-*` oneshot does not run
-#      first, the container boots with no network. The `before`/`after`/
-#      `requires` wiring below makes that ordering explicit.
-#
-# `domain` is asserted non-null so that enabling the module without a UI domain
-# fails at eval time rather than silently leaving the UI unproxied.
-#
-# Import into a host config and set, at minimum, `domain` and one of
-# `image` / `imageFile`.
 {
   config,
   lib,
@@ -195,17 +168,11 @@ in
       "d ${cfg.dataDir} 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
     ];
 
-    # Only the OTLP ingest ports are ever opened here, and only opt-in. The UI
-    # is never opened raw -- it is reached exclusively through the nginx TLS
-    # vhost below (the UI publish is bound to loopback).
     networking.firewall.allowedTCPPorts = mkIf cfg.openFirewall [
       cfg.otlpGrpcPort
       cfg.otlpHttpPort
     ];
 
-    # The container joins the `${cfg.network}` docker network by name. This
-    # oneshot must create it BEFORE the container starts, or the container
-    # boots with no network.
     systemd.services."docker-network-jaeger" = {
       serviceConfig = {
         Type = "oneshot";
@@ -224,10 +191,6 @@ in
       containers.jaeger = {
         inherit (cfg) image;
         imageFile = mkIf (cfg.imageFile != null) cfg.imageFile;
-        # The UI is bound to loopback so it is reachable ONLY through the nginx
-        # TLS vhost, never as raw plaintext HTTP on an external interface.
-        # OTLP ports are bound to `otlpListenAddress` (loopback by default);
-        # both binds matter because Docker DNAT bypasses the NixOS firewall.
         ports = [
           "127.0.0.1:${toString cfg.uiPort}:16686"
           "${cfg.otlpListenAddress}:${toString cfg.otlpGrpcPort}:4317"
@@ -240,8 +203,6 @@ in
       };
     };
 
-    # Only the UI is proxied for TLS. The OTLP ingest ports stay raw so
-    # collectors talk to the container directly.
     services.nginx.virtualHosts.${cfg.domain} = {
       forceSSL = true;
       useACMEHost = cfg.acmeHost;

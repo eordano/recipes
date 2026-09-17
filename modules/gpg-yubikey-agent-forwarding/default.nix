@@ -1,20 +1,3 @@
-# gpg-yubikey-agent-forwarding
-#
-# A NixOS module that configures a hardened GnuPG agent (tuned for a YubiKey /
-# smartcard) and, crucially, makes a host able to *receive* a gpg-agent that is
-# forwarded to it over SSH.
-#
-# The forwarding trap this solves:
-#   When another machine forwards its gpg-agent socket with SSH's
-#   `RemoteForward`, sshd binds the socket path on this host *before* your login
-#   shell would normally create `/run/user/<uid>/gnupg`. If that directory does
-#   not already exist (or exists with loose permissions), the forward fails --
-#   and it fails *silently*. This module pre-creates the directory with mode
-#   0700 via a oneshot user service, and forces the host's own gpg-agent off so
-#   it can't shadow the tunneled socket.
-#
-# Drop this file in as a module (e.g. `imports = [ ./gpg-yubikey-agent-forwarding ];`)
-# and set `modules.gpg.enable = true;`.
 {
   pkgs,
   config,
@@ -142,21 +125,14 @@ in
 
   config = mkIf cfg.enable (mkMerge [
     {
-      # A host receiving a forwarded agent must not run its own -- a local agent
-      # would shadow the tunneled socket.
       modules.gpg.enableAgent = mkIf cfg.receiveForwardedAgent false;
       modules.gpg.enableSSHSupport = mkIf cfg.receiveForwardedAgent false;
 
-      # Pre-create /run/user/<uid>/gnupg with mode 0700 BEFORE any SSH
-      # RemoteForward tries to bind a socket inside it. Without this the forward
-      # fails silently: sshd binds the path before login creates the directory,
-      # and a missing / loose-perm dir kills the forward with no visible error.
       systemd.user.services.gpg-forward-dir = mkIf cfg.receiveForwardedAgent {
         description = "Pre-create GPG agent forwarding directory";
         wantedBy = [ "default.target" ];
         serviceConfig = {
           Type = "oneshot";
-          # %t expands to the user's XDG_RUNTIME_DIR (/run/user/<uid>).
           ExecStart = "${pkgs.coreutils}/bin/mkdir -p %t/gnupg";
           ExecStartPost = "${pkgs.coreutils}/bin/chmod 700 %t/gnupg";
           RemainAfterExit = true;
@@ -179,26 +155,6 @@ in
       };
     }
 
-    # Home Manager gpg config, written to `home-manager.users.<user>`.
-    #
-    # Two-level gate, and the ordering of the two conditions matters:
-    #
-    #   * The outer `optionalAttrs (options ? home-manager)` decides whether the
-    #     `home-manager` attribute *name* appears in config at all. It must be
-    #     keyed on `options` (which modules are imported) -- a value that does
-    #     NOT depend on config -- because the module system has to know every
-    #     definition's attribute names before it can evaluate any option value.
-    #     Keying this on a config value (e.g. `cfg.configureHomeManager`) would
-    #     infinite-recurse; keying it on a bare `mkIf` would instead abort with
-    #     "The option `home-manager' does not exist" on hosts without Home
-    #     Manager, because the option-existence check ignores the mkIf condition.
-    #     `options ? home-manager` is static, so it is safe: the attribute simply
-    #     vanishes when the Home Manager NixOS module is not imported, and the
-    #     base agent/forwarding config keeps working standalone.
-    #
-    #   * The inner `mkIf cfg.configureHomeManager` gates the actual value -- safe
-    #     to key on a config value here, since the attribute name is already
-    #     present (Home Manager declares it) whenever this branch is reachable.
     (optionalAttrs (options ? home-manager) {
       home-manager.users.${cfg.user} = mkIf cfg.configureHomeManager {
         programs.gpg = {
@@ -226,8 +182,6 @@ in
             armor = true;
             use-agent = true;
           };
-          # disable-ccid works around flaky CCID drivers for many YubiKeys;
-          # gpg then talks to the card via its internal PC/SC path.
           scdaemonSettings = {
             disable-ccid = true;
           };

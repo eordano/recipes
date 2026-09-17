@@ -1,24 +1,3 @@
-# ssh-write-only-drop-box
-#
-# A write-only artifact drop-box over SSH. CI boxes rsync a directory in and
-# can never read, list, delete or overwrite anything. A systemd path unit
-# promotes each completed drop into published/ or moves it into quarantine/
-# with a reason file.
-#
-# The write-only property is enforced at the SSH TRANSPORT layer, not by the
-# application, and it takes BOTH halves to hold:
-#
-#   1. every key gets a forced restricted-rsync command in authorized_keys, and
-#   2. a `Match User` block sets `ForceCommand` (which overrides any command=
-#      in a key, and any command the client asks for) and narrows
-#      `AuthorizedKeysFile` so `~/.ssh/authorized_keys` inside the drop-box
-#      tree is not consulted at all.
-#
-# Half of that pairing is not a weaker version of the whole; it is no
-# enforcement at all. See the README.
-#
-# Drop-in NixOS module. Import it and set `enable`, `dataDir` and `pushKeys`.
-
 {
   config,
   lib,
@@ -38,10 +17,6 @@ let
 
   forcedCommand = "${lib.getExe cfg.rrsyncPackage} ${rrsyncFlags} ${cfg.dataDir}/incoming";
 
-  # `restrict` disables agent/port/X11 forwarding, PTY allocation and
-  # ~/.ssh/rc. Deliberately NOT followed by `pty` -- rsync never needs a
-  # terminal, and re-enabling one hands a shell escape to anything that ever
-  # gets to run outside the forced command.
   mkAuthorizedKey = k: ''command="${forcedCommand}",restrict ${k}'';
 
   mkHook =
@@ -112,18 +87,11 @@ let
     LockPersonality = true;
   };
 
-  # The worker never talks to PID 1, so it gets the strict profile.
-  # ReadWritePaths only restricts anything when something else has already
-  # made the filesystem read-only -- hence ProtectSystem=strict alongside it.
   workerHardening = commonHardening // {
     ProtectSystem = "strict";
     ReadWritePaths = [ cfg.dataDir ] ++ cfg.extraReadWritePaths;
   };
 
-  # The dispatcher and the sweep DO talk to PID 1. Connecting to a unix socket
-  # needs write access to the socket inode, so ProtectSystem=strict makes
-  # /run/systemd/private unreachable and every systemctl call fails. `full`
-  # leaves /run writable and still read-onlys /usr, /boot and /etc.
   controlHardening = commonHardening // {
     ProtectSystem = "full";
   };
@@ -417,11 +385,6 @@ in
       inherit (cfg) group;
       home = cfg.dataDir;
       createHome = false;
-      # A forced command is run as `<login shell> -c '<command>'`, so the push
-      # user MUST have a usable shell. The default `nologin` for a system user
-      # makes every push fail with a bare "This account is currently not
-      # available." and no other clue. Giving a real shell is safe precisely
-      # because ForceCommand replaces whatever the client asked for.
       shell = lib.mkDefault pkgs.bashInteractive;
       openssh.authorizedKeys.keys = map mkAuthorizedKey cfg.pushKeys;
     };
@@ -430,11 +393,6 @@ in
 
     services.openssh.settings.AllowUsers = lib.mkIf cfg.manageAllowUsers (lib.mkDefault [ cfg.user ]);
 
-    # mkOrder 2000 keeps this Match block at the END of sshd_config. Every
-    # line after a Match belongs to that Match until the next one, so a block
-    # emitted at the default order swallows any global directive another
-    # module appends afterwards -- and most keywords are not legal inside a
-    # Match, so sshd then refuses to start at all.
     services.openssh.extraConfig = lib.mkOrder 2000 ''
       Match User ${cfg.user}
         AuthorizedKeysFile /etc/ssh/authorized_keys.d/%u
@@ -487,10 +445,6 @@ in
         DROPBOX_WORKER_UNIT = "${cfg.name}@";
         DROPBOX_MAX_ID_LEN = toString cfg.maxIdLength;
       };
-      # A path unit that trips its triggered service's START rate limit fails
-      # too, and then stops watching. systemd's defaults (5 starts per 10s)
-      # are well inside the range a handful of near-simultaneous pushes
-      # produces, so the limit is removed here rather than tuned.
       unitConfig.StartLimitIntervalSec = 0;
       serviceConfig = {
         Type = "oneshot";
@@ -509,8 +463,6 @@ in
         Type = "oneshot";
         User = cfg.user;
         Group = cfg.group;
-        # A worker blocks for up to doneTimeoutSec waiting for the sentinel;
-        # give it room beyond that before systemd calls it hung.
         TimeoutStartSec = cfg.doneTimeoutSec + 60;
         ExecStart = ''${lib.getExe promoteScript} "%I"'';
       }

@@ -1,14 +1,3 @@
-# patroni-leader-proxy
-#
-# A local HAProxy that gives PostgreSQL clients a fixed endpoint which always
-# lands on the CURRENT Patroni leader. HAProxy TCP-forwards the PG port but
-# health-checks Patroni's REST API: `GET /primary` returns 200 only on the
-# leader and `GET /replica` returns 200 only on running replicas. The RW pool
-# therefore holds exactly one live server and re-points to a new leader within
-# `(inter x fall)` seconds of a failover -- no client reconfig, DNS, or restart.
-#
-# Import it, set `nodes` to your Patroni members, enable it, and point clients
-# at 127.0.0.1:<port>.
 {
   config,
   lib,

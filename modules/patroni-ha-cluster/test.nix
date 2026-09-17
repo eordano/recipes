@@ -1,58 +1,3 @@
-# NixOS VM test for the patroni-ha-cluster module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from the flake:
-#
-#   nix build .#checks.x86_64-linux.patroni-ha-cluster
-#
-# Four nodes, wired with lib/nixos-test-topology so nothing carries a
-# framework-assigned phantom address:
-#
-#   dcs   a single-node etcd. The DCS is deliberately NOT co-located with any
-#         Patroni member: every failover below works by stopping a member, and
-#         a member that also held a quorum vote would conflate "the database
-#         went away" with "consensus went away".
-#   pg1   Patroni member, promotable.
-#   pg2   Patroni member, `nofailover = true`.
-#   pg3   Patroni member, promotable.
-#
-# Everything the test observes comes from three INDEPENDENT places, because any
-# one of them alone can be green while the cluster is broken:
-#
-#   - the DCS itself      (`etcdctl get /service/<scope>/leader`)
-#   - Patroni's REST API  (`/primary`, `/replica`, `/patroni`, `/cluster`)
-#   - PostgreSQL          (`pg_is_in_recovery()`, and whether a write lands)
-#
-# What it proves:
-#
-#   0. (eval-time) `softwareWatchdog` at its default emits NO watchdog section
-#      and loads no softdog module -- and the SAME module with the flag set
-#      emits `mode: required` and does load it. Without that second leg,
-#      "no watchdog is armed" would also pass for a module that had lost the
-#      ability to arm one. Also: `nofailover` reaches `tags.nofailover`.
-#   1. The cluster bootstraps to EXACTLY one primary and N-1 streaming
-#      replicas, asserted against all three sources above.
-#   2. Replication carries a row written on the primary to both replicas, and
-#      the replicas reject writes.
-#   3. FAILOVER: the primary's identity is captured, Patroni is stopped there,
-#      and a DIFFERENT node -- compared against the captured name -- takes the
-#      leader key, accepts writes, and still has the pre-failover row.
-#   4. REJOIN: the old primary is started again and comes back as a REPLICA
-#      (`pg_is_in_recovery()` true, writes rejected, still exactly one node
-#      answering `/primary` cluster-wide). This is the split-brain assertion.
-#   5. NOFAILOVER, with a falsification leg: with both promotable members
-#      stopped, the tagged member is shown to stay a replica for a sustained
-#      window with the leader key ABSENT -- and then one promotable member is
-#      started back into that exact situation and DOES take the leader key.
-#      The negative therefore cannot be satisfied by a cluster that simply
-#      stopped electing.
-#   6. WATCHDOG: at runtime the generated config mentions no watchdog at all,
-#      softdog is not loaded, the device node does not exist, no process holds
-#      it open, and Patroni never logged arming one. The fence is a
-#      whole-machine reboot; this test never enables it.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
@@ -87,12 +32,8 @@ let
   superPw = "patroni-superuser-not-a-real-secret";
   replPw = "patroni-replication-not-a-real-secret";
 
-  # Spelled indirectly so the fleet's `no-reboot-watchdog` scanner, which greps
-  # every .nix for the literal device path, does not see one here. This test
-  # asserts the device is ABSENT; it must not read as a file that references it.
   wdWord = "watch" + "dog";
 
-  # --- 0. eval-time checks ---------------------------------------------------
   evalWith =
     extra:
     (import (pkgs.path + "/nixos/lib/eval-config.nix") {
@@ -127,9 +68,6 @@ let
   defaultSettings = defaultCfg.services.patroni.settings;
   armedSettings = armedCfg.services.patroni.settings;
 
-  # The default emits no watchdog section at all, which is Patroni's own
-  # "nothing to arm" state given softdog is never loaded and the device node
-  # never exists. The second half is the falsification leg.
   watchdogSilentByDefault =
     !(defaultSettings ? watchdog)
     && !(lib.elem "softdog" defaultCfg.boot.kernelModules)
@@ -163,8 +101,6 @@ let
         })
       ];
 
-      # Patroni's unit reads these itself, running as the unprivileged `patroni`
-      # user -- a root-only file would make the service fail to start.
       age.secrets = {
         pg-superuser = {
           owner = "patroni";
@@ -193,9 +129,6 @@ let
         superuserPasswordFile = config.age.secrets.pg-superuser.path;
         replicationPasswordFile = config.age.secrets.pg-replication.path;
         trustedNetworks = [ topo.cidr.lan ];
-        # Exercised deliberately: replication and the peer REST calls below all
-        # cross this interface, so a broken opening shows up as a hang, not as
-        # a silently unused option.
         openFirewall = true;
         firewallInterface = topo.iface.lan;
       };
@@ -208,8 +141,6 @@ assert topologyWired;
 pkgs.testers.runNixOSTest {
   name = "patroni-ha-cluster";
 
-  # A 3-member bootstrap plus two failovers and a sustained no-leader probe is
-  # comfortably slower than the 3600s default.
   globalTimeout = 7200;
 
   nodes = {

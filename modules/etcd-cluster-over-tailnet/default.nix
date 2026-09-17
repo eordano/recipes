@@ -1,37 +1,3 @@
-# etcd-cluster-over-tailnet
-#
-# Run an etcd cluster whose peer + client traffic rides ONLY a private mesh
-# interface (WireGuard / Tailscale / a VLAN) and never touches the public
-# firewall. Every etcd URL is derived from a single topology attrset so that
-# adding or removing a voter is a one-line edit, and the voting set is kept
-# narrow and co-located so a WAN link flap can't cost you quorum.
-#
-# This is a generalised, self-contained NixOS module. Drop it into your config
-# and import it. No external topology file is required -- the topology lives in
-# the `peers` option below.
-#
-# Usage (identical module on every voter, differing only in which host it runs
-# on -- `nodeName` defaults to the hostname):
-#
-#   imports = [ ./etcd-cluster-over-tailnet ];
-#
-#   services.etcdMesh = {
-#     enable = true;
-#     interface = "tailscale0";          # your private mesh interface
-#     clusterToken = "my-etcd-cluster";  # shared by all members
-#     peers = {                          # the *voting* set only
-#       node-a = "100.100.0.1";
-#       node-b = "100.100.0.2";
-#       node-c = "100.100.0.3";
-#     };
-#   };
-#
-# The `peers` attrset is the whole cluster topology: keys are etcd member
-# names, values are the address each member is reachable at *on the private
-# interface*. Keep this set small (3 or 5) and inside one low-latency zone.
-# Machines that consume the cluster but must never vote (e.g. cross-WAN
-# read replicas) simply are NOT listed here.
-
 {
   config,
   lib,
@@ -41,16 +7,8 @@
 let
   cfg = config.services.etcdMesh;
 
-  # This node's private-interface address. Normally looked up from the topology
-  # (`peers`), but a node that is JOINING an already-running cluster with
-  # `initialClusterState = "existing"` is registered out-of-band via
-  # `etcdctl member add` and is deliberately NOT part of the static bootstrap
-  # `peers` set -- such a node advertises its address via `nodeAddress`.
   nodeAddress = if cfg.nodeAddress != null then cfg.nodeAddress else cfg.peers.${cfg.nodeName};
 
-  # initial-cluster string, e.g. "node-a=http://10.0.0.1:2380,node-b=..."
-  # Derived from the single `peers` attrset so topology lives in exactly one
-  # place. Every member computes the *same* list.
   initialCluster = lib.mapAttrsToList (
     name: addr: "${name}=http://${addr}:${toString cfg.peerPort}"
   ) cfg.peers;
@@ -231,13 +189,10 @@ in
       name = cfg.nodeName;
       inherit (cfg) dataDir;
 
-      # Bind the client API to the mesh address AND loopback, so local
-      # `etcdctl` works without going over the network.
       listenClientUrls = [
         "http://${nodeAddress}:${toString cfg.clientPort}"
         "http://127.0.0.1:${toString cfg.clientPort}"
       ];
-      # Peer (raft) traffic is mesh-only -- never advertise a public address.
       listenPeerUrls = [
         "http://${nodeAddress}:${toString cfg.peerPort}"
       ];
@@ -257,9 +212,6 @@ in
 
     systemd.services.etcd.serviceConfig.TimeoutStartSec = cfg.startTimeoutSec;
 
-    # Open the etcd ports ONLY on the private mesh interface. Because these
-    # are per-interface rules, the ports stay closed on every public NIC even
-    # if the global firewall is otherwise permissive.
     networking.firewall.interfaces.${cfg.interface}.allowedTCPPorts = [
       cfg.clientPort
       cfg.peerPort

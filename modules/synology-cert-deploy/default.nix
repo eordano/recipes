@@ -1,17 +1,3 @@
-# synology-cert-deploy -- push externally-issued ACME certs into Synology DSM 7.
-#
-# DSM 7 runs its own web server and ships no ACME client you control. If your
-# host already renews certs for the NAS hostname (NixOS security.acme, acme.sh,
-# certbot, ...), this module is the last mile: it pushes each renewed cert *into*
-# the appliance over the DSM web API.
-#
-# Design point is blast-radius isolation. Each target is a unique DynamicUser
-# whose ONLY supplementary group is that target's certGroup, with certPath
-# mounted read-only -- so a compromised push reads exactly one NAS's private key
-# even when several targets share one host. The DSM password arrives via
-# LoadCredential (never argv/env). A per-target sha256 state file makes the
-# daily, jittered, Persistent timer a cheap no-op until the cert actually
-# changes.
 {
   config,
   lib,
@@ -29,9 +15,6 @@ let
     types
     ;
 
-  # The uploader is embedded so this module is a single-file drop-in.
-  # It talks SYNO.Core.Certificate.import and is idempotent: it hashes the
-  # cert material and skips the upload when nothing changed since last run.
   uploader = pkgs.writeText "synology-cert-deploy.py" ''
     #!/usr/bin/env python3
     """synology-cert-deploy - push an externally-issued ACME cert into a DSM 7

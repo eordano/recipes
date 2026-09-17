@@ -1,19 +1,3 @@
-# nvidia-docker-gpu -- GPU passthrough to Docker on NixOS
-#
-# GPU passthrough to `docker run --gpus all ...` on NixOS is a TWO-PART switch,
-# and enabling only one half silently gives you a Docker that can't see the GPU:
-#
-#   1. hardware.nvidia-container-toolkit.enable -- installs the CDI spec generator
-#      that describes the host GPU as a Container Device Interface device.
-#   2. A Docker daemon with the `cdi` feature gate turned ON -- without it dockerd
-#      ignores the generated CDI spec, and `--gpus` / `--device nvidia.com/gpu=all`
-#      resolve to nothing.
-#
-# A common shape for this is a one-line "joint enable" module that flips both
-# switches but delegates the load-bearing daemon config to a separate Docker
-# module -- and then that daemon config is easy to get wrong or forget. This
-# module INLINES the daemon config (CDI gate + the rootless-DNS fix), so
-# importing this single module is genuinely enough to get working GPU containers.
 {
   config,
   lib,
@@ -72,16 +56,12 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Half 1: generate the CDI spec describing the host GPU.
     hardware.nvidia-container-toolkit.enable = true;
 
-    # Half 2: a Docker daemon that actually honours that CDI spec.
     virtualisation.docker = {
       enable = true;
       enableOnBoot = true;
 
-      # THE load-bearing line: without the cdi feature gate, dockerd ignores the
-      # CDI device spec and `--gpus all` sees no GPU.
       daemon.settings = {
         features.cdi = true;
       }
@@ -95,10 +75,7 @@ in
         enable = true;
         setSocketVariable = true;
         daemon.settings = {
-          # The gate must be repeated for the rootless daemon -- it is a separate
-          # dockerd with its own config, it does not inherit the rootful one.
           features.cdi = true;
-          # ...and its own DNS, or rootless containers cannot resolve names.
           dns = cfg.rootlessDns;
         };
       };

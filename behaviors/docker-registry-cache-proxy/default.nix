@@ -1,23 +1,3 @@
-# docker-registry-cache-proxy
-#
-# Point BOTH rootful and rootless Docker at an HTTP pull-through registry
-# cache whose TLS is terminated with a self-signed CA. The whole trick is
-# that the CA must be trusted BEFORE docker.service starts, and it must be
-# installed under certs.d/ for the proxy host AND for both upstream Docker
-# Hub hostnames (registry-1.docker.io and registry.docker.io), because the
-# daemon consults certs.d/ keyed by the registry it thinks it is talking to.
-#
-# A oneshot fetches the CA over the network with a retry loop (the network
-# may not be up yet when the unit runs) and installs it before Docker.
-#
-# Usage:
-#   imports = [ ./docker-registry-cache-proxy ];
-#   behaviors.docker-cache = {
-#     enable   = true;
-#     cacheUrl = "https://docker-cache.example.com"; # your pull-through cache
-#     # proxyPort = 3128;                             # HTTP proxy port (default 3128)
-#     # caCertPath = "/ca.crt";                       # path on cacheUrl serving the CA
-#   };
 {
   config,
   lib,
@@ -27,8 +7,6 @@
 let
   cfg = config.behaviors.docker-cache;
 
-  # Parse a "scheme://host[:port][/path]" URL into parts without importing
-  # anything fleet-specific. Falls back to sane defaults on no match.
   parseUrl =
     url:
     let
@@ -120,11 +98,6 @@ in
         if cachePort == 443 || cachePort == 80 then "" else ":${toString cachePort}"
       }${cfg.caCertPath}";
 
-      # certs.d directory names. The daemon looks up the CA by the registry
-      # endpoint it addresses, so ALL THREE must be present:
-      #   - the proxy host:port itself
-      #   - registry-1.docker.io (the Docker Hub data endpoint)
-      #   - registry.docker.io   (the Docker Hub auth/index endpoint)
       certsdHosts = [
         "${cacheDomain}:${toString proxyPort}"
         "registry-1.docker.io"
@@ -139,12 +112,6 @@ in
         };
       };
 
-      # Retry loop: on early boot the network may not be reachable even after
-      # network-online.target, so keep trying instead of failing the boot.
-      # The CA is staged in a per-invocation private temp file (mktemp: random
-      # name, 0600) rather than a fixed world-writable /tmp path, so it is not a
-      # cross-user pre-seed / symlink TOCTOU target on multi-user hosts. Callers
-      # must set `CA_TMP="$(mktemp)"` (and rm it) around these snippets.
       downloadCaCert = ''
         max_attempts=${toString cfg.maxAttempts}
         attempt=0

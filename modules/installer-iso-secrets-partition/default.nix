@@ -1,39 +1,3 @@
-# installer-iso-secrets-partition
-#
-# A NixOS installer ISO whose credentials do NOT live in the image.
-#
-# The image is a pure, cacheable, shareable artifact. Every secret it needs at
-# boot (mesh-VPN pre-auth key, private-forge SSH identity, ...) lives on a
-# SEPARATE LABELLED PARTITION appended to the USB stick after the hybrid ISO has
-# been dd'd onto it. A boot-time oneshot polls for that label, mounts it
-# read-only at a tmpfs path, and orders itself BEFORE the units that consume the
-# credentials. If the partition is absent the unit exits 0 and the very same
-# image still boots as a plain rescue disk.
-#
-# The other half of the recipe is the flasher: `flasher.package` builds the ISO,
-# dd's it, appends the labelled partition to whatever disk label the hybrid
-# image left behind, formats it and copies the (age-decrypted) secrets straight
-# onto it -- never through the Nix store.
-#
-# See README.md for the five traps: the world-readable-image trap, the GPT
-# backup-header trap, the mkImageMediaOverride password-priority trap, copytoram,
-# and partition-node settling.
-#
-# Usage:
-#   imports = [ ./installer-iso-secrets-partition ];
-#   modules.installerSecretsPartition = {
-#     enable = true;
-#     label = "INSTALLER-SEC";
-#     secretFiles = {
-#       vpnAuthKey = "vpn-auth";
-#       forgeKey   = "forge-id_ed25519";
-#     };
-#     before = [ "tailscaled.service" ];
-#     flasher.enable = true;
-#   };
-#   services.tailscale.authKeyFile =
-#     config.modules.installerSecretsPartition.paths.vpnAuthKey;
-
 {
   config,
   lib,
@@ -43,12 +7,8 @@
 let
   cfg = config.modules.installerSecretsPartition;
 
-  # "installer-secrets-mount" -> "installer-secrets". Only used to prefix the
-  # unit's journal lines so they are greppable by the same name as the unit.
   logPrefix = lib.removeSuffix "-mount" cfg.unitName;
 
-  # The label is looked up with `blkid -L`, i.e. by FILESYSTEM label, not by GPT
-  # partition name. That is deliberate -- see README ("MBR loses nothing").
   mountScript = pkgs.writeShellScript cfg.unitName ''
     set -euo pipefail
     mkdir -p ${cfg.mountPoint}
@@ -144,10 +104,6 @@ let
       gawk
       gnused
     ];
-    # `nix`, `sudo` and `age`/`rage` are deliberately NOT runtimeInputs: they
-    # come from the operator's own environment, so the flasher uses the same nix
-    # daemon, the same sudo policy and the same (possibly hardware-backed) age
-    # implementation the operator already trusts.
     text = ''
       # ${cfg.flasher.name} -- build the installer ISO, dd it to a removable
       # device, then APPEND a labelled partition holding the out-of-band

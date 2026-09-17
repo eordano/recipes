@@ -1,12 +1,3 @@
-# GeoIP database provider -- one shared, credential-free GeoLite2 mirror.
-#
-# A single oneshot service downloads the GeoLite2 City/Country/ASN databases
-# into a shared directory. Its `RemainAfterExit = true` keeps the unit "active"
-# after a successful run, so consumer services can order themselves After/Wants
-# geoip-updater.service and be guaranteed the .mmdb files exist before they start.
-#
-# See README.md for the why/traps (P3TERX mirror vs MaxMind account wall,
-# RemainAfterExit gating, activation-time initial download, jitter).
 {
   config,
   lib,
@@ -17,8 +8,6 @@ with lib;
 let
   cfg = config.modules.services.geoip-databases;
 
-  # Each entry: filename written into dataDir. The mirror serves them all
-  # under the same path prefix (cfg.mirrorBaseUrl).
   inherit (cfg) databases;
 
   geoipUpdater = pkgs.writeShellScriptBin "geoip-updater" ''
@@ -125,8 +114,6 @@ in
 
       serviceConfig = {
         Type = "oneshot";
-        # Stay "active" after a successful run so consumers ordered
-        # After=/Wants=geoip-updater.service only start once the DBs exist.
         RemainAfterExit = true;
         ExecStart = "${geoipUpdater}/bin/geoip-updater";
         User = cfg.user;
@@ -154,10 +141,6 @@ in
       };
     };
 
-    # First-boot / first-deploy: pull the databases immediately so a consumer
-    # deployed alongside this module doesn't find an empty directory before the
-    # timer's OnBootSec fires. `|| true` keeps a failed download from aborting
-    # activation.
     system.activationScripts.geoip-databases = ''
       if [ ! -f ${cfg.dataDir}/${builtins.head cfg.databases} ]; then
         echo "GeoIP databases not found. Starting initial download..."

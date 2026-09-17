@@ -1,76 +1,3 @@
-# NixOS VM test for the etcd-cluster-over-tailnet module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from a flake:
-#
-#   pkgs.callPackage ./modules/etcd-cluster-over-tailnet/test.nix { }
-#
-# Three voters on ONE private subnet, wired with lib/nixos-test-topology so no
-# node carries a framework auto-assigned address. (`virtualisation.vlans = [ N ]`
-# would hand out a SECOND address per interface, because
-# `networking.interfaces.<i>.ipv4.addresses` is a list option and definitions
-# MERGE; mkForce would only hide that, not fix it.)
-#
-#             mesh 10.1.0/24
-#   alpha .11 ── bravo .12 ── charlie .13
-#
-# Every node imports the module with an IDENTICAL `services.etcdMesh` block --
-# `nodeName` defaults to the hostname, which is the module's documented usage.
-# The mesh interface stands in for tailscale0/wg0: the module opens the client
-# and peer ports ONLY there, and the global firewall stays ON. So the cluster
-# forming at all is already a functional test of the per-interface firewall
-# opening -- had the module opened nothing, raft could never connect.
-#
-# Non-default ports (12379/12380) are used deliberately: a module that ignored
-# `clientPort`/`peerPort` and baked in etcd's defaults would fail here instead
-# of passing by coincidence.
-#
-# FAULT INJECTION. Stopping etcd is done with KillSignal=SIGKILL, so `systemctl
-# stop` is an abrupt kill and NOT a graceful shutdown. This matters: etcd
-# transfers leadership on SIGTERM, so a graceful stop would hand the term to a
-# successor and "a new leader exists" would be true without a raft election ever
-# having run. The drop-in is asserted live before anything relies on it.
-#
-# What it proves, and what breaking it would look like:
-#
-#   0. (eval-time) URLs, the initial-cluster string, the token and the
-#      per-interface firewall openings are all derived from `peers` + the port
-#      options; the ports are NOT in the global `allowedTCPPorts`; the
-#      nodeName/nodeAddress assertion fires for an unlisted member and is
-#      satisfied by an explicit `nodeAddress` (the documented
-#      `initialClusterState = "existing"` join case).
-#   1. The cluster forms: all three healthy, ONE leader all three agree on,
-#      identical cluster id and identical member list everywhere.
-#   2. A write on ANY member is readable on EVERY member -- and out of every
-#      member's OWN store, not merely proxied to the leader on read.
-#   3. LEADER LOSS. The leader's identity is captured BEFORE the kill and the
-#      new leader is asserted to be a DIFFERENT member; "a leader exists" is
-#      satisfied for free by a leader that never stepped down. Writes still
-#      succeed on the two survivors. The old leader is then restarted and must
-#      rejoin as a FOLLOWER (its status names the new leader, not itself) and
-#      CATCH UP: a key written while it was down is read back from its own local
-#      store with a serializable read, and its revision reaches the leader's.
-#      "It is healthy again" would prove neither of those.
-#   4. QUORUM LOSS -- the data-safety assertion. With 2 of 3 down the survivor
-#      must REFUSE to serve. Proven as a triad, not as "the cluster reports
-#      unhealthy":
-#        * the write FAILS, and
-#        * the linearizable read FAILS, while
-#        * the SERIALIZABLE read of the same key still returns the pre-outage
-#          value -- so the server is demonstrably alive and holding the data,
-#          and the two failures are a deliberate refusal rather than a dead
-#          process. A stale read served as current would surface right here.
-#        * the local revision does not advance, so the refused write left no
-#          trace at all.
-#   5. QUORUM RESTORED -- the falsification leg for every negative in 4. The
-#      byte-identical put that failed during the outage now SUCCEEDS, so the
-#      refusal was about quorum and not about a malformed command. Before that
-#      write lands, the pre-outage value is asserted intact on both the survivor
-#      and the node that was down -- i.e. the refused write committed nowhere.
-#      Finally the third member returns and all three converge.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
@@ -99,9 +26,6 @@ let
 
   peers = lib.listToAttrs (map (n: lib.nameValuePair n topo.ip.${n}.mesh) nodeNames);
 
-  # The configuration under test. Defined once so the eval-time checks and the
-  # VM nodes cannot drift apart, and identical on every voter -- which is the
-  # module's headline usage claim.
   etcdMeshConfig = {
     enable = true;
     interface = topo.iface.mesh;
@@ -113,7 +37,6 @@ let
       ;
   };
 
-  # --- 0. eval-time checks ---------------------------------------------------
   evalWith =
     extra:
     (import (pkgs.path + "/nixos/lib/eval-config.nix") {
@@ -141,8 +64,6 @@ let
 
   selfAddr = topo.ip.alpha.mesh;
 
-  # Every etcd URL is derived from `peers` + the port options -- one topology,
-  # five URL sets. A hardcoded port or a dropped loopback URL fails here.
   urlsOk =
     let
       e = goodEval.services.etcd;
@@ -161,8 +82,6 @@ let
     && e.initialClusterToken == clusterToken
     && e.initialClusterState == "new";
 
-  # Mesh-only: the ports are opened on the mesh interface and are NOT in the
-  # global list, so they stay shut on every public NIC.
   firewallOk =
     let
       f = goodEval.networking.firewall;
@@ -175,8 +94,6 @@ let
     && !(lib.elem peerPort f.allowedTCPPorts)
     && !goodEval.services.etcd.openFirewall;
 
-  # A member that is neither a key of `peers` nor given a `nodeAddress` has no
-  # address to advertise. That must surface as the module's own assertion.
   strayOk =
     builtins.any (x: lib.hasInfix "is not a key of" x.message && lib.hasInfix "delta" x.message)
       (
@@ -185,8 +102,6 @@ let
         })
       );
 
-  # The documented join case: absent from the bootstrap `peers` set, address
-  # given explicitly, cluster state "existing".
   joiningEval = evalWith {
     networking.hostName = lib.mkForce "delta";
     services.etcdMesh = {
@@ -210,20 +125,12 @@ let
     let
       etcdctl = "${config.services.etcd.package}/bin/etcdctl";
 
-      # Thin wrapper so the test script never repeats endpoint/timeout flags.
-      # It targets 127.0.0.1 on purpose: the module adds a loopback client URL
-      # so local etcdctl works without routing over the mesh, and every command
-      # in this test exercises that.
       etcdc = pkgs.writeShellScriptBin "etcdc" ''
         exec ${etcdctl} \
           --endpoints=http://127.0.0.1:${cp} \
           --command-timeout=6s --dial-timeout=2s "$@"
       '';
 
-      # Prints the CURRENT leader's member name, or exits non-zero when there is
-      # no leader / the local server cannot answer. Written in python because
-      # etcd member ids are uint64 and jq would silently mangle them through a
-      # double, quietly turning every leader-identity assertion into a coin flip.
       etcdLeader = pkgs.writeScriptBin "etcd-leader" ''
         #!${pkgs.python3}/bin/python3
         import json
@@ -268,16 +175,10 @@ let
 
       system.stateVersion = "25.05";
 
-      # Left ON deliberately. The module opens the etcd ports only on the mesh
-      # interface, so a cluster that forms is proof those per-interface rules
-      # exist and work.
       networking.firewall.enable = true;
 
       services.etcdMesh = etcdMeshConfig;
 
-      # Fault injection, not tuning: an abrupt kill instead of etcd's graceful
-      # shutdown, which transfers leadership and would rob the election subtest
-      # of anything to observe.
       systemd.services.etcd.serviceConfig.KillSignal = "SIGKILL";
 
       environment.systemPackages = [
@@ -286,32 +187,35 @@ let
         pkgs.iptables
       ];
     };
+  withEvalGates =
+    script:
+    assert lib.assertMsg goodOk
+      "etcd-cluster-over-tailnet test: the deployed config has failing assertions: ${
+        lib.generators.toPretty { } (failing goodEval)
+      }";
+    assert lib.assertMsg urlsOk
+      "etcd-cluster-over-tailnet test: services.etcd URLs are no longer derived from `peers` + the port options: ${
+        lib.generators.toPretty { } goodEval.services.etcd
+      }";
+    assert lib.assertMsg firewallOk
+      "etcd-cluster-over-tailnet test: the etcd ports are no longer opened ONLY on the mesh interface. per-interface=${
+        lib.generators.toPretty { }
+          goodEval.networking.firewall.interfaces.${topo.iface.mesh}.allowedTCPPorts
+      } global=${lib.generators.toPretty { } goodEval.networking.firewall.allowedTCPPorts}";
+    assert lib.assertMsg strayOk
+      "etcd-cluster-over-tailnet test: a nodeName that is not a key of `peers` and has no `nodeAddress` no longer trips the module's assertion";
+    assert lib.assertMsg joinOk
+      "etcd-cluster-over-tailnet test: the `nodeAddress` + existing-cluster join case is broken: ${
+        lib.generators.toPretty { } joiningEval.services.etcd
+      }";
+    script;
 in
-assert lib.assertMsg goodOk
-  "etcd-cluster-over-tailnet test: the deployed config has failing assertions: ${
-    lib.generators.toPretty { } (failing goodEval)
-  }";
-assert lib.assertMsg urlsOk
-  "etcd-cluster-over-tailnet test: services.etcd URLs are no longer derived from `peers` + the port options: ${
-    lib.generators.toPretty { } goodEval.services.etcd
-  }";
-assert lib.assertMsg firewallOk
-  "etcd-cluster-over-tailnet test: the etcd ports are no longer opened ONLY on the mesh interface. per-interface=${
-    lib.generators.toPretty { }
-      goodEval.networking.firewall.interfaces.${topo.iface.mesh}.allowedTCPPorts
-  } global=${lib.generators.toPretty { } goodEval.networking.firewall.allowedTCPPorts}";
-assert lib.assertMsg strayOk
-  "etcd-cluster-over-tailnet test: a nodeName that is not a key of `peers` and has no `nodeAddress` no longer trips the module's assertion";
-assert lib.assertMsg joinOk
-  "etcd-cluster-over-tailnet test: the `nodeAddress` + existing-cluster join case is broken: ${
-    lib.generators.toPretty { } joiningEval.services.etcd
-  }";
 pkgs.testers.runNixOSTest {
   name = "etcd-cluster-over-tailnet";
 
   nodes = lib.genAttrs nodeNames node;
 
-  testScript = ''
+  testScript = withEvalGates ''
     import json
 
     MACHINES = dict(${machinesDict})

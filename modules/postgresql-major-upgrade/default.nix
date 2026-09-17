@@ -17,8 +17,6 @@ let
   newPkg = cfg.newPackage;
   newMajor = newPkg.psqlSchema;
 
-  # nixpkgs keeps throwing stubs for majors that reached EOL (postgresql_13 and
-  # friends), so every candidate has to survive tryEval before we touch it.
   usableOldPackage =
     v:
     let
@@ -26,9 +24,6 @@ let
     in
     probe.success && probe.value;
 
-  # Only the canonical postgresql_<major> attrs: the variants (..._jit and the
-  # unversioned alias) repeat a psqlSchema already covered, which would emit
-  # duplicate case branches.
   availableOld = lib.filterAttrs (
     n: v: builtins.match "postgresql_[0-9]+" n != null && usableOldPackage v
   ) pkgs;
@@ -440,10 +435,6 @@ in
       }
     ];
 
-    # The guard, not a unit dependency, is what keeps postgres off a mismatched
-    # cluster. It holds even if this unit is masked, disabled or never ran, and
-    # because it is only Wants= below, re-running the upgrade by hand cannot
-    # drag a healthy database down with it.
     systemd.services.postgresql.preStart = lib.mkBefore ''
       if [ -e ${lib.escapeShellArg cfg.dataDir}/PG_VERSION ]; then
         on_disk=$(tr -d '[:space:]' < ${lib.escapeShellArg cfg.dataDir}/PG_VERSION)
@@ -459,9 +450,6 @@ in
     systemd.services.postgresql-major-upgrade = {
       description = "PostgreSQL major-version upgrade (dump/restore)";
 
-      # Wants=, never Requires=: postgresql pulls the upgrade in and waits for
-      # it, but stopping or restarting the upgrade does not propagate a stop
-      # back to a running database.
       before = [ "postgresql.service" ];
       wantedBy = lib.optionals (!cfg.requireManualStart) [ "postgresql.service" ];
       after = [

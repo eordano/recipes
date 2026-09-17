@@ -1,26 +1,3 @@
-# Harmonia binary cache with a transparent, disk-cached upstream fallback.
-#
-# One substituter URL covers BOTH this machine's own /nix/store (served and
-# signed by harmonia) AND an on-disk-cached copy of an upstream substituter
-# (cache.nixos.org by default). A 404 from harmonia falls through to an
-# nginx proxy_cache'd upstream: the first peer to request a path warms the
-# local disk cache, and every subsequent peer -- plus this builder itself --
-# then hits local disk instead of the WAN.
-#
-# Import into a NixOS host, then set:
-#   modules.services.harmonia.enable = true;
-#   modules.services.harmonia.domain = "cache.example.com";
-#   modules.services.harmonia.acmeHost = "cache.example.com";
-#   modules.services.harmonia.signKeyFile = "/run/secrets/cache-priv-key";
-#   modules.services.harmonia.upstreamFallback.enable = true;
-#
-# Generate the signing key once with:
-#   nix-store --generate-binary-cache-key cache.example.com-1 \
-#     cache-priv-key.pem cache-pub-key.pem
-# Keep the private half out of the store (agenix / sops / a systemd cred /
-# any out-of-band path) and hand its path to signKeyFile. Publish the public
-# half to consumers as trusted-public-keys.
-
 {
   config,
   lib,
@@ -151,14 +128,11 @@ in
       };
     };
 
-    # nginx (not the harmonia user) owns the proxy_cache directory, and the
-    # hardened nginx unit needs it whitelisted as writable.
     systemd.tmpfiles.rules = mkIf fb.enable [
       "d ${fb.cacheDir} 0755 nginx nginx -"
     ];
     systemd.services.nginx.serviceConfig.ReadWritePaths = mkIf fb.enable [ fb.cacheDir ];
 
-    # proxy_cache_path must live at http{} scope, not inside a server block.
     services.nginx.appendHttpConfig = mkIf fb.enable (
       lib.mkAfter ''
         proxy_cache_path ${fb.cacheDir} levels=1:2 keys_zone=harmonia_upstream:200m max_size=${fb.maxCacheSize} inactive=60d use_temp_path=off;
@@ -168,11 +142,6 @@ in
     services.nginx.virtualHosts."${cfg.domain}" = {
       forceSSL = true;
       useACMEHost = cfg.acmeHost;
-      # A `resolver` alone does NOT make nginx re-resolve a proxy target: an
-      # upstream written literally in proxy_pass is resolved once, at config
-      # load. Only a proxy_pass built from a *variable* is resolved per request
-      # -- and that form in turn REQUIRES a resolver. So the two are emitted
-      # together or not at all.
       extraConfig = mkIf (fb.enable && fb.resolver != null) ''
         resolver ${fb.resolver} valid=30s ipv6=off;
         set $harmonia_upstream ${fb.endpoint};

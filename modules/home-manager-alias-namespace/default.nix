@@ -1,18 +1,3 @@
-# home-manager-alias-namespace
-#
-# Exposes a thin top-level `home.*` namespace (file / activation / env /
-# programs / services) that `mkAliasDefinitions` forwards into one or more
-# Home Manager users. Any other NixOS module can then write
-#
-#     home.file.".config/foo".text = "...";
-#
-# without knowing which user owns the Home Manager config or how it is wired.
-# Also ships an optional nightly `nix-index` rebuild (so `nix-locate` /
-# command-not-found stays fresh) at idle IO priority, and an optional XDG
-# user-dirs redirect that tucks the standard dirs under an archive/ subtree.
-#
-# Drop it into your imports and set `enable-home-manager = true;`. Requires the
-# home-manager NixOS module to be imported elsewhere in your configuration.
 {
   config,
   options,
@@ -28,10 +13,6 @@ let
     type: default: description:
     lib.mkOption { inherit type default description; };
 
-  # XDG user-dirs pointed at an archive/ subtree so $HOME itself stays tidy.
-  # The unusual bits: `user-dirs.conf` with enabled=False stops the
-  # xdg-user-dirs-update daemon from rewriting these paths at login, and
-  # createDirectories=false avoids materialising empty dirs you never use.
   xdgConfig = {
     enable = true;
     configFile."user-dirs.conf".text = "enabled=False\n";
@@ -50,12 +31,6 @@ let
     };
   };
 
-  # Per-user Home Manager config. Every user in `home-manager-alias.users`
-  # receives the SAME aliased definitions, so a single `home.file....` set by
-  # any module lands in all of them. mkAliasDefinitions is the load-bearing
-  # trick: it forwards the *definitions* (not the merged value) of the
-  # top-level option into the HM option, preserving priorities / mkForce /
-  # mkIf from the contributing modules.
   mkUser =
     _name:
     lib.mkMerge [
@@ -84,8 +59,6 @@ in
   options = {
     enable-home-manager = lib.mkEnableOption "the top-level home.* alias namespace";
 
-    # The public namespace other modules contribute to. Kept deliberately
-    # loose (attrs) so any module can add to it without importing this file.
     home = {
       programs = lib.mkOption {
         description = "Home Manager programs.* (contributed by other modules).";
@@ -131,9 +104,6 @@ in
         };
       };
 
-      # Extra Home Manager modules shared across all managed users, e.g. a
-      # theming module. Left empty by default so this recipe carries no
-      # opinion about your desktop.
       sharedModules = lib.mkOption {
         type = lib.types.listOf lib.types.unspecified;
         default = [ ];
@@ -169,10 +139,6 @@ in
   };
 
   config = lib.mkIf cfg {
-    # Nightly nix-index rebuild. Runs at Nice 19 / idle IO so it never
-    # competes with foreground work; Persistent + RandomizedDelaySec means a
-    # box that was asleep at the scheduled time still catches up (jittered so
-    # a fleet doesn't stampede). Needs network for the store metadata fetch.
     systemd.services.nix-index-update = lib.mkIf hm.nixIndex.enable {
       description = "Rebuild the nix-index files database (nix-locate / command-not-found)";
       after = [ "network-online.target" ];

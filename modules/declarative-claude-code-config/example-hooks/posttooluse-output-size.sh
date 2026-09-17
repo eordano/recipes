@@ -4,7 +4,7 @@ INPUT=$(cat)
 
 STDOUT=$(printf '%s' "$INPUT" | jq -r '.tool_result.stdout // empty')
 STDERR=$(printf '%s' "$INPUT" | jq -r '.tool_result.stderr // empty')
-TOTAL_LEN=$(( ${#STDOUT} + ${#STDERR} ))
+TOTAL_LEN=$((${#STDOUT} + ${#STDERR}))
 
 if [ "$TOTAL_LEN" -gt 10000 ]; then
   COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // "unknown"')

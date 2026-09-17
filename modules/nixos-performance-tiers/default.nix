@@ -332,15 +332,10 @@ in
       ];
     }
 
-    # ── CPU ────────────────────────────────────────────────────────────────
     (mkIf (cfg.cpu.governor != null) {
       powerManagement.cpuFreqGovernor = lib.mkDefault cfg.cpu.governor;
     })
 
-    # Trade-offs are PLAIN assignments (priority 100): they must beat a
-    # hardening tier's mkDefault without reaching for mkForce. A `null`
-    # trade-off emits nothing at all, which is the difference between
-    # "inherit the tier's decision" and "override it to the same value".
     (mkIf (t.smt != null) { security.allowSimultaneousMultithreading = t.smt; })
     (mkIf (t.pti != null) { security.forcePageTableIsolation = t.pti; })
     (mkIf (t.l1dFlush != null) { security.virtualisation.flushL1DataCache = t.l1dFlush; })
@@ -355,7 +350,6 @@ in
     (mkIf cfg.cpu.slabDebug { boot.kernelParams = [ "slub_debug=FZP" ]; })
     (mkIf cfg.cpu.slabNoMerge { boot.kernelParams = [ "slab_nomerge" ]; })
 
-    # ── Memory ─────────────────────────────────────────────────────────────
     {
       zramSwap = {
         enable = lib.mkDefault cfg.memory.zram.enable;
@@ -370,14 +364,10 @@ in
       };
     }
 
-    # zfs is a loadable module, so the `zfs.zfs_arc_max=` kernel-cmdline form
-    # is not a reliable delivery path. extraModprobeConfig is `types.lines`,
-    # so this merges with anything else writing modprobe options.
     (mkIf (cfg.memory.arcMaxBytes != null) {
       boot.extraModprobeConfig = "options zfs zfs_arc_max=${toString cfg.memory.arcMaxBytes}\n";
     })
 
-    # ── Storage ────────────────────────────────────────────────────────────
     (mkIf (cfg.storage.manageZfs && hasZfs) (mkMerge [
       {
         services.zfs = {
@@ -393,7 +383,6 @@ in
       })
     ]))
 
-    # ── Hardening tier selection ───────────────────────────────────────────
     (mkIf cfg.hardeningTier.apply {
       hardening = {
         basic = lib.mkDefault cfg.hardeningTier.basic;

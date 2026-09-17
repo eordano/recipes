@@ -34,15 +34,12 @@ from datetime import date
 
 TAG = "[mesh-drift]"
 
-
 def run(cmd, timeout=15):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
 
 def skip(msg):
     print(f"{TAG} skipped: {msg}")
     sys.exit(0)
-
 
 def parse_args(argv):
     p = argparse.ArgumentParser(add_help=True)
@@ -67,7 +64,6 @@ def parse_args(argv):
     p.add_argument("--no-auto-add", action="store_true",
                    help="report unknown devices instead of appending them to the map")
     return p.parse_args(argv)
-
 
 def live_nodes(args):
     """address -> live name, from the local agent's view of the netmap."""
@@ -95,13 +91,10 @@ def live_nodes(args):
         ips = [i for i in (n.get("TailscaleIPs") or []) if i.startswith(args.overlay_prefix)]
         if not ips:
             continue
-        # The DNS label is the control plane's given-name; HostName is whatever
-        # the machine calls itself locally and drifts independently.
         dns = (n.get("DNSName") or "").rstrip(".")
         name = dns.split(".")[0] if dns else (n.get("HostName") or "?")
         live[ips[0]] = name.lower()
     return live
-
 
 def load_map(map_path, args):
     try:
@@ -118,7 +111,6 @@ def load_map(map_path, args):
     return (m[args.key_addresses],
             m.get(args.key_aliases, {}) or {},
             set(m.get(args.key_ignore, []) or []))
-
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
@@ -144,7 +136,6 @@ def main(argv=None):
     addresses, aliases, ignore = load_map(map_path, args)
 
     by_addr = {addr: name for name, addr in addresses.items()}
-    # live name (lowercased) -> the canonical name and address it belongs to
     known = {n.lower(): (n, a) for n, a in addresses.items()}
     for canon, alias in aliases.items():
         if canon in addresses:
@@ -161,9 +152,6 @@ def main(argv=None):
             if name not in (canonical.lower(), aliases.get(canonical, "").lower()):
                 mismatches.append((addr, canonical, name))
             continue
-        # Unknown address. Before treating it as a new device, check for the
-        # "<name>-<n>" shape: that is a re-registration of a machine we already
-        # track, not a new machine.
         m = re.fullmatch(r"(.+?)-(\d+)", name)
         if m and m.group(1) in known:
             canon, canon_addr = known[m.group(1)]
@@ -199,9 +187,6 @@ def main(argv=None):
             for addr, name in unknown.items():
                 print(f"  {name} = {addr}")
             sys.exit(1)
-        # `git add` stages the whole file. If the map already has unstaged
-        # edits, appending and staging would sweep the author's half-finished
-        # work into this commit -- refuse instead.
         dirty = run(["git", "-C", toplevel, "diff", "--name-only", "--", map_rel]).stdout.strip()
         if dirty:
             print(f"{TAG} live overlay has devices missing from {map_rel}:")
@@ -227,7 +212,6 @@ def main(argv=None):
 
     if unseen:
         print(f"{TAG} note: {len(unseen)} map entries not visible from this host's netmap (fine).")
-
 
 if __name__ == "__main__":
     main()

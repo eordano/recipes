@@ -1,47 +1,3 @@
-# rclone-synced-folders
-#
-# Declarative rclone-over-SFTP folder sync for NixOS, in two modes:
-#
-#   - lazy: the remote is mounted as a FUSE VFS with a local on-disk cache
-#     (systemd.mounts + systemd.automounts). Files are fetched on demand and
-#     cached; nothing is copied up front. Requires `cacheDir`.
-#
-#   - full: rclone bisync on a timer. Bidirectional, newer file wins, deletions
-#     propagate. The first run auto-establishes a `--resync` baseline, tracked by
-#     a per-folder `.resync-done` state file so the destructive baseline runs
-#     exactly once. `--check-access` + RCLONE_TEST sentinels refuse to sync into
-#     an empty/broken mount, and `maxDelete` aborts a run that would delete too
-#     large a fraction of files.
-#
-# Both modes share one generated rclone config (one SFTP remote per folder).
-#
-# Usage:
-#   imports = [ ./rclone-synced-folders ];
-#   services.synced-folders = [
-#     {
-#       name       = "repos";
-#       server     = "your-host";                # any SSH-reachable host
-#       user       = "alice";
-#       sshKeyFile = "/home/alice/.ssh/id_ed25519";
-#       serverPath = "/home/alice/repos";
-#       localPath  = "/home/alice/repos";
-#       owner      = "alice";
-#       type       = "lazy";
-#       cacheDir   = "/var/cache/rclone-repos";
-#     }
-#     {
-#       name       = "documents";
-#       server     = "your-host";
-#       user       = "alice";
-#       sshKeyFile = "/home/alice/.ssh/id_ed25519";
-#       serverPath = "/home/alice/documents";
-#       localPath  = "/home/alice/documents";
-#       owner      = "alice";
-#       type       = "full";
-#       syncInterval = "5min";
-#     }
-#   ];
-
 {
   config,
   lib,
@@ -249,8 +205,6 @@ let
   lazyFolders = filter (f: f.type == "lazy") cfg;
   fullFolders = filter (f: f.type == "full") cfg;
 
-  # Resolve the numeric uid/gid for a lazy mount: explicit option wins, otherwise
-  # derive from the host's declared owner user / owner group.
   resolveUid =
     f: if f.uid != null then f.uid else attrByPath [ "users" "users" f.owner "uid" ] null config;
   resolveGid =

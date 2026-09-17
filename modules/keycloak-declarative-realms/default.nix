@@ -333,9 +333,6 @@ in
         };
       };
 
-      # The admin password must exist in an EnvironmentFile before keycloak.service
-      # starts. systemd resolves EnvironmentFile *before* running ExecStartPre, so a
-      # preStart hook is too late -- a separate `before=` oneshot is required.
       systemd.services.keycloak = {
         requires = [ "keycloak-admin-setup.service" ];
         after = [ "keycloak-admin-setup.service" ];
@@ -347,11 +344,6 @@ in
         };
       };
 
-      # Runs as the keycloak user, not root: RuntimeDirectory already creates
-      # /run/keycloak owned by it, and LoadCredential lets PID1 (still root)
-      # read initialAdminPasswordFile on the unit's behalf and hand it over
-      # through $CREDENTIALS_DIRECTORY regardless of that file's own
-      # permissions -- so nothing here needs a privileged chown/cat.
       systemd.services.keycloak-admin-setup = {
         description = "Prepare Keycloak admin credentials";
         before = [ "keycloak.service" ];
@@ -386,9 +378,6 @@ in
 
       systemd.services.keycloak-configure =
         let
-          # Must talk to localhost: the `master` realm defaults to
-          # sslRequired=external, which rejects plain-HTTP requests from any
-          # non-local address. A loopback URL is exempt.
           keycloakUrl = "http://localhost:${toString cfg.port}";
 
           configScript = pkgs.writeShellScript "keycloak-config" ''

@@ -14,10 +14,6 @@ let
 
   cfg = config.zfsWipeOnBoot;
 
-  # The initrd mount unit for a filesystem is the /sysroot-prefixed, systemd-
-  # escaped mount point. This mirrors `getPoolMounts` in
-  # nixos/modules/tasks/filesystems/zfs.nix, including the trailing-slash strip
-  # that keeps "/" from becoming "sysroot-.mount".
   initrdMountUnit =
     mountPoint: "${utils.escapeSystemdPath ("/sysroot" + (lib.removeSuffix "/" mountPoint))}.mount";
 
@@ -25,11 +21,6 @@ let
 
   enabled = lib.filterAttrs (_: e: e.enable) cfg.datasets;
 
-  # sysroot.mount is the ONLY anchor that is always present and always ordered
-  # ahead of every other /sysroot/* mount (systemd.mount(5): a mount unit
-  # beneath another in the hierarchy gains an implicit Requires= and After= on
-  # the parent). Naming the dataset's own mount unit as well is redundant but
-  # self-documenting, and it costs nothing.
   beforeUnits =
     e:
     lib.unique (
@@ -86,9 +77,6 @@ let
 
   mounted = lib.filterAttrs (_: e: e.mountPoint != null) enabled;
 
-  # Which declared filesystem actually governs `path`? The DEEPEST matching
-  # mount point wins, so a persisted dataset nested under a wiped one (the
-  # usual /persist-under-/ layout) is correctly seen as safe.
   governingMount =
     path:
     let
@@ -100,11 +88,8 @@ let
 
   wipedMountPoints = lib.mapAttrsToList (_: e: e.mountPoint) mounted;
 
-  # A path is destroyed on every boot iff the mount governing it is wiped.
   onWipedPath = path: lib.elem (governingMount path) wipedMountPoints;
 
-  # Only reason about real filesystem paths. Store paths are immutable and
-  # irrelevant here; a non-absolute value is not ours to interpret.
   plainPath =
     p:
     let
@@ -134,8 +119,6 @@ let
       dataset = mkOption {
         type = types.str;
         example = "rpool/local/home";
-        # No default: guessing a dataset name from an attribute key is how a
-        # wipe ends up pointed at nothing.
         description = ''
           Full ZFS dataset name. The pool component is used to derive the
           initrd import unit this rollback is ordered after

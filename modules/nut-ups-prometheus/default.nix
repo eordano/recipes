@@ -1,19 +1,3 @@
-# nut-ups-prometheus
-#
-# Wire a locally-attached UPS into NUT (Network UPS Tools) plus the Prometheus
-# NUT exporter, everything bound to localhost. Two real-world traps are baked in
-# as options:
-#
-#   1. Cheap / OEM "megatec"-style UPSes driven by `nutdrv_qx` are frequently
-#      misidentified under `port = "auto"`, so they need an explicit
-#      `vendorid`/`productid` USB match.
-#   2. Auto-shutdown can be deliberately disabled (`MINSUPPLIES = 0` plus a
-#      log-only `SHUTDOWNCMD`) so a critical-battery event rides the battery out
-#      instead of powering the host down.
-#
-# Drop-in NixOS module. Import it and set at minimum `enable` and
-# `passwordFile`.
-
 {
   config,
   lib,
@@ -148,14 +132,12 @@ in
           powerValue = 0;
         };
         settings = mkIf cfg.disableAutoShutdown {
-          # Ride the battery out: never trigger an automated shutdown.
           MINSUPPLIES = 0;
           SHUTDOWNCMD = ''"${pkgs.util-linux}/bin/logger -t upsmon ALERT: UPS reports critical battery; auto-shutdown intentionally disabled"'';
         };
       };
     };
 
-    # Silence the "no discharge estimate" init warning some drivers emit.
     systemd.services.upsdrv.environment.NUT_QUIET_INIT_NDE_WARNING = "true";
 
     services.prometheus.exporters.nut = {

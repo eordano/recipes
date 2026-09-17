@@ -1,34 +1,3 @@
-# jupyterlab-cuda-sandboxed
-#
-# Run a GPU/CUDA JupyterLab (or any PyTorch / Triton / torch.compile JIT
-# workload) as a native systemd service under a strict sandbox.
-#
-# The two traps this module solves:
-#   1. CUDA JIT (Triton, TorchInductor, hand-written extensions) needs to map
-#      W+X memory pages, so MemoryDenyWriteExecute MUST be false. And the
-#      framework needs raw /dev/nvidia* nodes, so PrivateDevices MUST be false.
-#      Everything else stays locked down; GPU access is narrowed back with
-#      DevicePolicy=closed + an explicit per-index NVIDIA device whitelist.
-#   2. ProtectSystem=strict makes the whole filesystem read-only except
-#      ReadWritePaths. Every ML framework cache (HuggingFace, XDG, Triton,
-#      TorchInductor) is therefore redirected under the one writable dataDir,
-#      or the first import/compile blows up trying to write outside it.
-#
-# The notebook itself has NO token and NO password. It binds loopback
-# (127.0.0.1) so the raw port is unreachable off-box regardless of firewall
-# state; the nginx TLS vhost is the sole authenticator and front door. Never
-# proxy it onto an untrusted network. Enabling asserts a domain + ACME host.
-#
-# Usage:
-#   imports = [ ./jupyterlab-cuda-sandboxed ];
-#   services.jupyterlabCuda = {
-#     enable   = true;
-#     domain   = "notebooks.example.com";
-#     acmeHost = "notebooks.example.com";
-#     # For recent CUDA wheels, point this at an unstable nixpkgs instance:
-#     # cudaPkgs = inputs.nixpkgs-unstable.legacyPackages.${pkgs.system};
-#   };
-
 {
   config,
   lib,
@@ -39,24 +8,17 @@
 let
   cfg = config.services.jupyterlabCuda;
 
-  # Which nixpkgs instance provides python / torch / cudatoolkit. Defaults to
-  # the host pkgs, but you almost certainly want to point this at an unstable
-  # channel so the ML wheels track recent CUDA builds -- and so torch resolves
-  # to the SAME store closure your other CUDA services use (one shared
-  # PyTorch build instead of compiling it once per service).
   cpkgs = cfg.cudaPkgs;
 
-  pythonEnv = cpkgs.python313.withPackages (
+  pythonEnv = cpkgs.python3.withPackages (
     ps:
     (with ps; [
-      # notebook stack
       jupyter
       jupyterlab
       notebook
       ipykernel
       ipywidgets
       nbconvert
-      # ML / data
       numpy
       pandas
       matplotlib
@@ -73,7 +35,6 @@ let
       xgboost
       shap
       optuna
-      # utility / io
       requests
       beautifulsoup4
       lxml
@@ -91,11 +52,9 @@ let
       click
       joblib
       dask
-      # language-server support for jupyterlab-lsp (Python side)
       jupyterlab-lsp
       python-lsp-server
       python-lsp-ruff
-      # misc web / graph
       flask
       fastapi
       uvicorn
@@ -108,10 +67,6 @@ let
     ++ (cfg.extraPythonPackages ps)
   );
 
-  # --- NVIDIA device whitelist ------------------------------------------------
-  # DevicePolicy=closed denies every device node; this hands back exactly the
-  # NVIDIA control/UVM/modeset/caps nodes plus one /dev/nvidiaN per GPU index.
-  # So gpuIndices = [ "0" ] exposes precisely GPU 0 and nothing else.
   mkNvidiaDeviceAllow =
     { gpuIndices }:
     [
@@ -266,8 +221,6 @@ in
       inherit (cfg) gid;
     };
 
-    # Pre-create the cache tree so the first import doesn't race against a
-    # missing directory under the read-only root.
     systemd.tmpfiles.rules = [
       "d ${cfg.dataDir} 0755 ${toString cfg.uid} ${toString cfg.gid} - -"
       "d ${cfg.dataDir}/notebooks 0755 ${toString cfg.uid} ${toString cfg.gid} - -"
@@ -284,14 +237,11 @@ in
       after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
 
-      # These reach the notebook runtime so torch.compile / Triton / hand-written
-      # CUDA extensions can actually compile from inside a cell. jupyterlab-lsp
-      # also shells out to these language servers for non-Python buffers.
       path =
         (with pkgs; [
           gcc
           glibc.dev
-          cpkgs.python313Packages.pybind11
+          cpkgs.python3Packages.pybind11
           ninja
           cpkgs.cudaPackages.cudatoolkit
           pyright
@@ -307,19 +257,16 @@ in
       environment = {
         HOME = cfg.dataDir;
 
-        # Userspace NVIDIA driver, brought into the strict mount namespace by
-        # BindReadOnlyPaths below.
         LD_LIBRARY_PATH = "/run/opengl-driver/lib";
         CC = "${pkgs.gcc}/bin/gcc";
         CUDA_VISIBLE_DEVICES = cfg.cudaDevices;
         CUDA_HOME = "${cpkgs.cudaPackages.cudatoolkit}";
         NCCL_P2P_DISABLE = "1";
 
-        CPLUS_INCLUDE_PATH = "${cpkgs.python313Packages.pybind11}/include";
+        CPLUS_INCLUDE_PATH = "${cpkgs.python3Packages.pybind11}/include";
 
         PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True";
 
-        # Every framework cache MUST live under dataDir (the sole writable path).
         HF_HOME = "${cfg.dataDir}/.cache/huggingface";
         TRANSFORMERS_CACHE = "${cfg.dataDir}/.cache/transformers";
         HF_HUB_CACHE = "${cfg.dataDir}/.cache/hub";
@@ -337,10 +284,8 @@ in
         Restart = "always";
         RestartSec = 3;
 
-        # Idempotent; --force keeps the Deno JS/TS kernel current across bumps.
         ExecStartPre = "${pkgs.deno}/bin/deno jupyter --install --force";
 
-        # No token, no password: auth is entirely the nginx TLS vhost.
         ExecStart = ''
           ${pythonEnv}/bin/jupyter lab \
             --ip=${cfg.bindIp} \
@@ -355,7 +300,6 @@ in
             --ServerApp.allow_remote_access=True
         '';
 
-        # ---- sandbox --------------------------------------------------------
         NoNewPrivileges = true;
         PrivateTmp = true;
         ProtectSystem = "strict";
@@ -364,10 +308,7 @@ in
         ReadWritePaths = [ cfg.dataDir ];
         BindReadOnlyPaths = [ "/run/opengl-driver" ];
 
-        # THE TWO KNOBS CUDA FORCES OPEN:
-        # JIT kernels need writable+executable pages.
         MemoryDenyWriteExecute = false;
-        # torch needs raw /dev/nvidia* nodes.
         PrivateDevices = false;
 
         RestrictAddressFamilies = [
@@ -377,7 +318,6 @@ in
           "AF_NETLINK"
         ];
 
-        # ...but hand back only the NVIDIA nodes for the selected GPU indices.
         DevicePolicy = "closed";
         DeviceAllow = mkNvidiaDeviceAllow {
           gpuIndices = lib.splitString " " cfg.cudaDevices;
@@ -398,7 +338,6 @@ in
         ProtectProc = "invisible";
         UMask = "0077";
 
-        # Only capability kept: renice / thread-pin.
         CapabilityBoundingSet = [ "CAP_SYS_NICE" ];
         AmbientCapabilities = [ "CAP_SYS_NICE" ];
 
@@ -411,7 +350,7 @@ in
       useACMEHost = cfg.acmeHost;
       locations."/" = {
         proxyPass = "http://127.0.0.1:${toString cfg.port}/";
-        proxyWebsockets = true; # kernel comm channel
+        proxyWebsockets = true;
         recommendedProxySettings = true;
         extraConfig = ''
           proxy_set_header Accept-Encoding "";

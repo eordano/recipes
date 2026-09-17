@@ -1,27 +1,3 @@
-# tailscale-lan-router -- turn a NixOS box into a LAN router with a
-# bridge + NAT + Kea DHCP + Blocky ad-blocking DNS (+ optional IPv6 radvd),
-# with an optional fix so LAN clients also egress through a Tailscale exit node.
-#
-# The load-bearing insight lives in the `tailscaleExitNode` option description
-# below: when the router itself uses a Tailscale exit node, forwarded LAN
-# packets keep their 192.168.x source, fall outside the exit node's WireGuard
-# AllowedIPs, and are dropped silently. The fix is to MASQUERADE LAN traffic
-# onto tailscale0 (and open the FORWARD path + udp/41641).
-#
-# Drop-in usage:
-#   imports = [ ./tailscale-lan-router ];
-#   modules.lan-router = {
-#     enable        = true;
-#     wanInterface  = "enp1s0";
-#     bridge.interfaces = [ "enp2s0" "enp3s0" ];
-#     lan.v4 = {
-#       address  = "192.168.100.1";
-#       subnet   = "192.168.100.0/24";
-#       dhcpPool = "192.168.100.100 - 192.168.100.200";
-#     };
-#     dns.upstreams = [ "1.1.1.1" "8.8.8.8" ];
-#     tailscaleExitNode = true;   # only if this router uses an exit node
-#   };
 {
   config,
   lib,
@@ -33,17 +9,6 @@ let
   bridgeAddr4 = "${cfg.lan.v4.address}/${toString cfg.lan.v4.prefixLength}";
   bridgeAddr6 = lib.optionalString cfg.lan.v6.enable "${cfg.lan.v6.address}/${toString cfg.lan.v6.prefixLength}";
 
-  # networking.firewall.extraCommands/extraStopCommands and
-  # networking.nat.extraCommands/extraStopCommands are each asserted =="" by
-  # nixpkgs' nftables-based firewall/NAT backends (firewall-nftables.nix,
-  # nat-nftables.nix) -- see the two backend flags below. FORWARD needs no
-  # nftables-side translation: neither backend filters the forward hook
-  # unless `networking.firewall.filterForward` is turned on (nftables-only,
-  # off by default and NOT toggled by this module), so forwarded traffic is
-  # open-by-default under both backends and the iptables path's explicit
-  # FORWARD ACCEPT rules are already redundant with that default. Only the
-  # INPUT-side icmpv6 accept (INPUT is filtered by default, unlike FORWARD)
-  # and the tailscale0 MASQUERADE need a real nftables-side rule.
   nftFirewall = config.networking.firewall.backend == "nftables";
   nftNat = config.networking.nftables.enable;
   denylistNames = lib.attrNames cfg.dns.blocking.denylists;
@@ -209,10 +174,6 @@ in
         '';
       };
 
-      # networking.nat's nftables backend (nat-nftables.nix) has no
-      # extraCommands escape hatch at all (it asserts them =="" ), so the
-      # exit-node MASQUERADE gets its own small nftables table instead of
-      # piggybacking on `networking.nat`.
       nftables.tables."lan-router-tailscale-nat" = lib.mkIf (cfg.tailscaleExitNode && nftNat) {
         family = "ip";
         content = ''
@@ -257,11 +218,6 @@ in
           ''
         );
 
-        # input-allow is spliced in regardless of filterForward, so this
-        # works on the nftables backend with no other config required. There
-        # is no FORWARD-side rule to add: neither backend filters the
-        # forward hook unless filterForward is on (see the note above), so
-        # this module never touches it.
         extraInputRules = lib.optionalString (nftFirewall && cfg.lan.v6.enable) ''
           ip6 nexthdr icmpv6 accept
         '';

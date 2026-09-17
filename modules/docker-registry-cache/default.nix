@@ -1,24 +1,3 @@
-# A LAN-wide pull-through cache for Docker/OCI registries, built on
-# rpardini/docker-registry-proxy (an HTTPS-intercepting caching proxy).
-#
-# The whole point of this module is to get the four non-obvious things
-# right that make the proxy actually usable:
-#
-#   1. The proxy mints its OWN CA on first run and intercepts TLS to the
-#      upstream registries. Clients must trust that CA or every pull fails
-#      with a cert error. We serve it over nginx at /ca.crt so onboarding
-#      a new client is a single curl.
-#   2. Registry credentials are given as a friendly host:user:pass file,
-#      converted to the proxy's AUTH_REGISTRIES form ONLY at preStart into
-#      /run (tmpfs) -- the expanded secret never lands on persistent disk.
-#   3. The CA-export step races the container's cold-boot CA generation,
-#      so it polls for both the container and the CA file before copying.
-#   4. All nginx buffering is disabled so multi-GB image layers stream
-#      through instead of being spooled to disk (and timing out).
-#
-# Drop it into a NixOS host that already runs Docker + nginx, point your
-# LAN Docker daemons at https://<domain>, trust /ca.crt, and pulls are
-# cached.
 {
   config,
   lib,
@@ -29,16 +8,8 @@ with lib;
 let
   cfg = config.modules.services.docker-registry-cache;
 
-  # NixOS names oci-container units "<backend>-<container>". With the
-  # docker backend and container "docker-registry-proxy" that is
-  # "docker-docker-registry-proxy".
   proxyUnit = "docker-docker-registry-proxy";
 
-  # Address nginx must CONNECT to in order to reach the published container
-  # port. A bind wildcard is not a connect target, so map it back to loopback
-  # (a wildcard publish covers loopback anyway); bracket IPv6 literals, which
-  # proxy_pass requires. Anything else is used verbatim, so moving
-  # `listenAddress` to a specific interface moves the front end with it.
   proxyUpstream =
     let
       addr = cfg.listenAddress;
@@ -216,11 +187,6 @@ in
       "d ${cfg.cacheDir}/ca 0755 root root -"
     ];
 
-    # rpardini generates its intercept CA into the /ca volume only AFTER
-    # first start. This oneshot polls for the container and then the CA
-    # file, then copies it where nginx can serve it. mkForce'd ordering +
-    # Restart=on-failure handle the cold-first-boot race where the CA does
-    # not exist yet when this unit first runs.
     systemd.services.docker-registry-proxy-ca-export = {
       description = "Export the docker-registry-proxy intercept CA for clients";
       unitConfig = {
@@ -300,7 +266,6 @@ in
           DEBUG = "false";
           DEBUG_NGINX = "false";
 
-          # Do not buffer client requests inside the proxy either.
           PROXY_REQUEST_BUFFERING = "false";
 
           VERIFY_SSL = if cfg.verifySSL then "true" else "false";
@@ -308,9 +273,6 @@ in
       };
     };
 
-    # Build the AUTH_REGISTRIES env-file just-in-time in tmpfs so the
-    # expanded credentials never persist. Always create the env-file (even
-    # empty) because the container references it via --env-file.
     systemd.services.${proxyUnit} = {
       preStart = lib.mkBefore (
         if cfg.authConfigFile != null then
@@ -340,8 +302,6 @@ in
       inherit (cfg) enableACME;
       inherit (cfg) useACMEHost;
 
-      # Serve the proxy's intercept CA so clients can trust it:
-      #   curl -o proxy.crt https://<domain>/ca.crt
       locations."/ca.crt" = {
         root = "/var/lib/nginx/docker-registry-proxy";
         extraConfig = ''

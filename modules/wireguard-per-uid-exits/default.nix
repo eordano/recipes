@@ -41,8 +41,6 @@ let
         inherit (pin) uid uidRangeRule;
       }) e.pins;
 
-      # The relay is itself nothing but a pin: a dedicated uid whose egress is
-      # marked into this exit's table.
       markEntries =
         lib.optional e.socksRelay.enable {
           uid = relayUid;
@@ -67,9 +65,6 @@ let
     m:
     "meta skuid ${toString m.uid} meta mark != ${toString m.tunnelFwmark} meta mark set ${toString m.fwmark}";
 
-  # The recursion guard is the `meta mark !=` clause. Continuation lines are
-  # indented by a fixed string because nft does not care about whitespace and
-  # the alternative is a second concatenation pass.
   nftRuleset = ''
     table inet ${naming.nftTable} {
       chain output {
@@ -89,10 +84,8 @@ let
     "ip46tables -t mangle -D OUTPUT -m owner --uid-owner ${toString m.uid} "
     + "-m mark ! --mark ${toString m.tunnelFwmark} -j MARK --set-mark ${toString m.fwmark} || true";
 
-  # Everything below the config selection is source-independent: parse the
-  # WireGuard config out of $CONF, create the interface, and install this
-  # exit's routing table + fwmark rule.
   setupTail = l: ''
+    bring_up() {
     echo "$CONF" | grep -oP 'PrivateKey\s*=\s*\K.*' > "$RUN/private-key"
     chmod 400 "$RUN/private-key"
 
@@ -132,6 +125,46 @@ let
     ip rule add fwmark "$FWMARK" lookup "$TABLE" priority "$PRIO"
 
     echo "wg interface $IFACE up (peer $ENDPOINT, src $IPV4_BARE, fwmark $FWMARK -> table $TABLE)"
+    }
+
+    wait_handshake() {
+      i=0
+      while [ "$i" -lt "$1" ]; do
+        if [ "$(wg show "$IFACE" latest-handshakes | awk '{ print $2; exit }')" != "0" ]; then
+          return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+      done
+      return 1
+    }
+  '';
+
+  bundleLoop = l: ''
+    ORDER=$(echo "$FILTERED" | tr ' ' '\n' | shuf)
+    CHOSEN=""
+    for candidate in $ORDER; do
+      CHOSEN="$candidate"
+      echo "selected ${cfg.providerLabel} config: $CHOSEN"
+      CONF=$(unzip -p "$ZIP" "$CHOSEN")
+      if [ -n "$ACTIVE" ]; then
+        h="$(basename "$CHOSEN" .conf)"
+        NEWIP=$(printf '%s\n' "$ACTIVE" | awk -v h="$h" '$1 == h { print $2; exit }')
+        if [ -n "$NEWIP" ]; then
+          CONF=$(printf '%s\n' "$CONF" | sed -E "s/^(Endpoint[[:space:]]*=[[:space:]]*)[^:]+(:[0-9]+)/\1$NEWIP\2/")
+        fi
+      fi
+      bring_up
+      if wait_handshake ${toString l.exit.configBundle.handshakeTimeout}; then
+        exit 0
+      fi
+      echo "no handshake from $CHOSEN within ${toString l.exit.configBundle.handshakeTimeout}s; trying the next entry" >&2
+    done
+    echo "every candidate failed to handshake; leaving $CHOSEN configured for the watchdog to re-roll" >&2
+  '';
+
+  fileOnce = _: ''
+    bring_up
   '';
 
   bundleSetup = l: ''
@@ -159,10 +192,27 @@ let
       exit 1
     fi
 
-    CHOSEN=$(echo "$FILTERED" | tr ' ' '\n' | shuf -n1)
-    echo "selected ${cfg.providerLabel} config: $CHOSEN"
-
-    CONF=$(unzip -p "$ZIP" "$CHOSEN")
+    ACTIVE=""
+    ${lib.optionalString (l.exit.configBundle.activeListUrl != null) ''
+      if ACTIVE=$(curl -sS -m 20 "${l.exit.configBundle.activeListUrl}" | jq -r '${l.exit.configBundle.activeListJq}' 2>/dev/null) && [ -n "$ACTIVE" ]; then
+        LIVE=""
+        for conf in $FILTERED; do
+          h="$(basename "$conf" .conf)"
+          if printf '%s\n' "$ACTIVE" | grep -q "^$h "; then
+            LIVE="$LIVE $conf"
+          fi
+        done
+        LIVE="''${LIVE## }"
+        if [ -n "$LIVE" ]; then
+          FILTERED="$LIVE"
+        else
+          echo "no zip entry is in the provider's active list; using the zip as-is" >&2
+        fi
+      else
+        ACTIVE=""
+        echo "active list unavailable; using the zip as-is" >&2
+      fi
+    ''}
   '';
 
   fileSetup = l: ''
@@ -175,7 +225,12 @@ let
   '';
 
   setupScript =
-    l: (if l.exit.configBundle != null then bundleSetup l else fileSetup l) + "\n" + setupTail l;
+    l:
+    (if l.exit.configBundle != null then bundleSetup l else fileSetup l)
+    + "\n"
+    + setupTail l
+    + "\n"
+    + (if l.exit.configBundle != null then bundleLoop l else fileOnce l);
 
   pinOpts = _: {
     options = {
@@ -285,6 +340,38 @@ let
                   picked. Defaults to every entry in the zip.
                 '';
               };
+              activeListUrl = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = "https://api.mullvad.net/www/relays/all/";
+                description = ''
+                  Provider relay list fetched before an entry is chosen. A zip
+                  goes stale: servers move to a new address or retire while
+                  the zip still names them, and a tunnel to a stale endpoint
+                  never handshakes. Entries missing from the list are skipped
+                  and the chosen entry's endpoint host is replaced by the
+                  listed address. If the list cannot be fetched the zip is
+                  used as-is.
+                '';
+              };
+              activeListJq = lib.mkOption {
+                type = lib.types.str;
+                default = ''.[] | select(.type == "wireguard" and .active) | "\(.hostname) \(.ipv4_addr_in)"'';
+                description = ''
+                  jq program turning the fetched list into `<hostname> <ipv4>`
+                  lines, hostname being the entry basename minus `.conf`.
+                '';
+              };
+              handshakeTimeout = lib.mkOption {
+                type = lib.types.int;
+                default = 12;
+                description = ''
+                  Seconds to wait for the first handshake before the next
+                  entry is tried. Persistent keepalive makes the kernel
+                  initiate immediately, so a live server answers within a
+                  couple of seconds.
+                '';
+              };
             };
           }
         );
@@ -383,6 +470,29 @@ in
 {
   options.services.wireguardExits = {
     enable = lib.mkEnableOption "N simultaneous WireGuard exits with per-uid egress pinning";
+
+    watchdog = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Per-exit timer that restarts the setup unit (re-rolling the server
+          when a bundle is used) once the tunnel's last handshake is older
+          than `maxHandshakeAge`. With persistent keepalive a healthy tunnel
+          handshakes at least every two minutes, so a stale one is dead.
+        '';
+      };
+      interval = lib.mkOption {
+        type = lib.types.str;
+        default = "2min";
+        description = "OnUnitActiveSec between checks.";
+      };
+      maxHandshakeAge = lib.mkOption {
+        type = lib.types.int;
+        default = 180;
+        description = "Seconds since the last handshake after which the exit is re-rolled.";
+      };
+    };
 
     providerLabel = lib.mkOption {
       type = lib.types.str;
@@ -540,10 +650,6 @@ in
 
   config = lib.mkMerge [
     {
-      # Defined unconditionally (and outside the mkIf) so that a consumer
-      # module can read it without knowing whether this module is enabled, and
-      # because a readOnly option may not carry a `default` -- lib/modules.nix
-      # counts the default as one of the definitions it forbids stacking.
       services.wireguardExits.nftRuleset = nftRuleset;
 
       services.wireguardExits.slots = lib.listToAttrs (
@@ -652,6 +758,10 @@ in
 
               path =
                 lib.optional (l.exit.configBundle != null) pkgs.unzip
+                ++ lib.optionals (l.exit.configBundle != null && l.exit.configBundle.activeListUrl != null) [
+                  pkgs.curl
+                  pkgs.jq
+                ]
                 ++ (with pkgs; [
                   coreutils
                   wireguard-tools
@@ -687,6 +797,30 @@ in
               };
             };
           }
+          // lib.optionalAttrs cfg.watchdog.enable {
+            "${l.setupUnit}-watchdog" = {
+              description = "Re-roll ${cfg.providerLabel} ${l.name} when ${l.iface} stops handshaking";
+              after = [ "${l.setupUnit}.service" ];
+              path = with pkgs; [
+                wireguard-tools
+                gawk
+                coreutils
+                systemd
+              ];
+              serviceConfig.Type = "oneshot";
+              script = ''
+                set -u
+                last=$(wg show ${l.iface} latest-handshakes 2>/dev/null | awk '{ print $2; exit }')
+                last=''${last:-0}
+                now=$(date +%s)
+                age=$((now - last))
+                if [ "$last" = 0 ] || [ "$age" -gt ${toString cfg.watchdog.maxHandshakeAge} ]; then
+                  echo "${l.iface}: last handshake $last (age ''${age}s) -- restarting ${l.setupUnit}"
+                  systemctl restart ${l.setupUnit}.service
+                fi
+              '';
+            };
+          }
         ) exits
         ++ map (
           p:
@@ -718,6 +852,22 @@ in
             };
           }
         ) uidRangePins
+      );
+
+      systemd.timers = lib.mkIf cfg.watchdog.enable (
+        lib.listToAttrs (
+          map (
+            l:
+            lib.nameValuePair "${l.setupUnit}-watchdog" {
+              wantedBy = [ "timers.target" ];
+              timerConfig = {
+                OnBootSec = "3min";
+                OnUnitActiveSec = cfg.watchdog.interval;
+                RandomizedDelaySec = "20s";
+              };
+            }
+          ) exits
+        )
       );
     })
   ];

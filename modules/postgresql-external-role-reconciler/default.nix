@@ -1,21 +1,3 @@
-# postgresql-external-role-reconciler
-#
-# Drive role passwords, ownership and read-only grants into a PostgreSQL server
-# this host does NOT run: a managed cloud instance, a Patroni cluster reached
-# through a leader proxy, a database VM on the other side of a VPN.
-#
-# Upstream `services.postgresql.ensureUsers` cannot do this -- its whole config
-# block is `mkIf cfg.enable` (nixpkgs
-# nixos/modules/services/databases/postgresql.nix:609) and the unit that applies
-# it, `postgresql-setup`, `requires`/`after` the local `postgresql.service` and
-# talks to the local unix socket (ibid. :870-885). It also has no file-based
-# password input at all: the only way in is `ensureClauses.password`, a literal
-# Nix string that lands in a world-readable store path (ibid. :473, :74-87).
-#
-# One oneshot per role. Secrets arrive through systemd `LoadCredential`, so the
-# service user never needs read access to the secret file and the unit can run
-# as a `DynamicUser`. The cleartext password is handed to psql through the
-# environment and psql's `\getenv` (PostgreSQL >= 14), never on argv.
 {
   config,
   lib,
@@ -34,9 +16,6 @@ let
     types
     ;
 
-  # Every identifier this module emits is double-quoted, and every identifier is
-  # also checked against `identPattern` by an assertion -- the two together are
-  # what keep a config value from becoming SQL.
   q = s: ''"${s}"'';
   identPattern = "[A-Za-z_][A-Za-z0-9_$]*";
   badIdent = s: builtins.match identPattern s == null;
@@ -57,8 +36,6 @@ let
     export PGPASSWORD
   '';
 
-  # Fail loudly and early if the server is unreachable, instead of emitting a
-  # psql connection error per statement.
   waitBlock = ''
     deadline=$(( $(date +%s) + ${toString cfg.readyTimeoutSec} ))
     until ${cfg.package}/bin/pg_isready -q; do
@@ -95,9 +72,6 @@ let
       '') role.revokePublicConnect
     );
 
-  # A separate psql session, because it is the only one that carries the
-  # cleartext. `SET log_statement` keeps the ALTER out of the server log even if
-  # the server is globally configured to log DDL.
   passwordSQL = name: ''
     ${optionalString cfg.suppressStatementLogging ''
       SET log_statement = 'none';
@@ -129,10 +103,6 @@ let
       ) ro.schemas
     );
 
-  # SQL goes to the store as files and is run with `psql -f`. No heredocs (whose
-  # terminator would have to survive Nix indentation stripping) and no secret
-  # ever reaches these files -- the password session only names an environment
-  # variable for psql to read.
   sqlFile =
     name: suffix: text:
     pkgs.writeText "pg-role-${name}-${suffix}.sql" text;
@@ -522,8 +492,6 @@ in
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
-          # A oneshot may use Restart=on-failure (not =always). An unreachable
-          # server is a transient condition on a host that boots before its VPN.
           Restart = "on-failure";
           RestartSec = cfg.restartSec;
           DynamicUser = cfg.dynamicUser;

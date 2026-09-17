@@ -1,27 +1,3 @@
-# nix-github-token
-#
-# Feed Nix an authenticated GitHub personal access token (PAT) so that flake
-# input resolution and `fetchFromGitHub` sources escape github.com's
-# 60-request/hour unauthenticated, per-IP rate limit (authenticated: 5000/hr).
-#
-# Two deliberate design choices worth keeping:
-#
-#   1. The token is materialised into a file under /run (tmpfs), never baked
-#      into the store-resident, world-readable /etc/nix/nix.conf. `access-tokens`
-#      is a secret; it must not land in the Nix store.
-#
-#   2. Nix pulls the file in with `!include` (note the leading bang), which is
-#      the *optional* include form: Nix does NOT error if the file is missing.
-#      That matters because the file is absent on a fresh boot before the
-#      activation script has run, or before your secret-management system has
-#      decrypted the token. A plain `include` would make every nix invocation
-#      fail in that window.
-#
-# This module is secret-manager agnostic: point `tokenFile` at any file that
-# ends up containing the raw PAT at runtime (agenix, sops-nix,
-# systemd credentials, a manually-placed 0400 file, ...). Whatever produces
-# that file should run before the `nix-github-access-tokens` activation script;
-# set `activationDeps` accordingly (e.g. [ "agenix" ] or [ "setupSecrets" ]).
 {
   lib,
   config,
@@ -90,8 +66,6 @@ in
       deps = cfg.activationDeps;
     };
 
-    # `!include` (bang) = optional include: no error when the file is missing,
-    # which it is on fresh boot / before the secret is decrypted.
     nix.extraOptions = ''
       !include ${cfg.runtimeFile}
     '';

@@ -1,66 +1,3 @@
-# NixOS VM test for the per-uid-egress-lockdown module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from a flake:
-#
-#   pkgs.callPackage ./modules/per-uid-egress-lockdown/test.nix { }
-#
-# ---------------------------------------------------------------------------
-# What it proves, and why each assertion cannot be satisfied by accident
-# ---------------------------------------------------------------------------
-#
-# The module makes one claim that matters: the squid ACL is ADVISORY and the
-# nftables `output` rule is the enforcement. A test that only drives traffic
-# through the proxy proves the advisory half and nothing else -- it would stay
-# green with the whole nft table deleted.
-#
-# So every network assertion here is paired with a PACKET COUNTER, and the two
-# counters sit on opposite sides of the boundary:
-#
-#   * an `output`-hook counter ON the confined host, at priority -300, matching
-#     `meta skuid <confined uid>` -- i.e. BEFORE the module's chain (priority 0)
-#     gets to drop anything. It answers "did the confined process actually emit
-#     a packet at the destination?".
-#   * a `forward`-hook counter on the ROUTER (lib/nixos-test-topology's
-#     `fixtures.forwardCounter`). It answers "did that packet leave the box?".
-#
-# The bypass subtest asserts BOTH: output counter > 0 (the process really tried)
-# AND router counter == 0 (nothing got out). A broken module fails one or the
-# other -- a deleted nft table makes the router counter non-zero and the request
-# succeed; a test topology that quietly stopped routing makes the output counter
-# zero and would otherwise look like a successful "block".
-#
-#   0. (eval time) uid == proxyUid is rejected by the module's own assertion.
-#      This is the module's documented corollary, and it is an EVAL-time
-#      property: see the note at the bottom of this comment.
-#   1. The confined uid reaches an allowlisted destination through the proxy,
-#      the traffic transits the router, and the confined uid itself never sent
-#      a packet at the destination (the proxy uid did).
-#   2. The confined uid gets 403 for a non-allowlisted domain, and the router
-#      sees zero packets toward it -- squid refused, rather than the network
-#      being broken.
-#   3. THE CENTRAL CLAIM. The confined uid connects DIRECTLY to the allowlisted
-#      destination's IP with the proxy explicitly disabled. The kernel drops it
-#      (EPERM), the local output counter proves the SYN was emitted, and the
-#      router's forward counter proves nothing left the host.
-#   4. A different uid on the same host runs the identical command against the
-#      identical address and succeeds -- including to the NON-allowlisted
-#      destination. The lockdown is scoped to the uid, not to the host.
-#   5. The shipped bubblewrap launcher does all three of the above in one run
-#      of the real wrapper, including `--noproxy '*'` from inside the sandbox.
-#   6. The confined uid cannot resolve names either; DNS belongs to the proxy.
-#
-# On the "proxy must run as a different uid" corollary: the module asserts
-# `uid != proxyUid` at eval, so subtest 0 is where that misconfiguration is
-# caught, and it is caught before a VM ever boots. Would the RUNTIME test catch
-# it if the assertion were removed? Yes, but only as collateral damage: with a
-# shared uid the sandbox's `drop` rule matches squid's own egress, squid cannot
-# reach any origin, and subtest 1 fails with a proxy-side error. That is a real
-# failure but a misleading one -- it reads as "the proxy is broken", not as "the
-# lockdown is void". The eval check is what names the actual fault.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
@@ -72,8 +9,6 @@ let
   bystanderUid = 60950;
   proxyPort = 3128;
   proxyLog = "/run/${name}-squid/access.log";
-  # Long enough for several SYN retransmits to hit the output hook, short
-  # enough that two deliberate hangs do not dominate the test's runtime.
   bypassTimeout = 5;
 
   allowedBody = "ALLOWED-ORIGIN-PAYLOAD";
@@ -85,9 +20,6 @@ let
       ext.vlan = 2;
     };
     hosts = {
-      # Alphabetical rank would have been agent=1, allowed=2, denied=3,
-      # router=4 in 192.168.<vlan>.<rank>. mkTopology takes that away; the
-      # first subtest asserts no 192.168.* address survives anywhere.
       agent = {
         addresses.lan = 10;
         via = "router";
@@ -114,8 +46,6 @@ let
   deniedIP = topo.ip.denied.ext;
   routerLanIP = topo.ip.router.lan;
 
-  # One self-signed cert covering both origins. The clients use `-k`; the
-  # subject of this test is the packet path, not PKI.
   originCert =
     pkgs.runCommand "per-uid-egress-lockdown-test-cert"
       {
@@ -148,14 +78,6 @@ let
       };
     };
 
-  # An `output`-hook counter on the confined host, at a priority BELOW the
-  # module's chain, matching only the confined uid. This is the instrument that
-  # distinguishes "the kernel dropped the packet" from "the program never sent
-  # one" -- without it, a bypass subtest is satisfied by a typo in the URL.
-  #
-  # lib/nixos-test-topology's `fixtures.forwardCounter` is the same idea but is
-  # hardwired to the `forward` hook, so it cannot be reused here; see the README
-  # note about generalising it.
   outputCounterTable = "agent_out";
   outputCounterRules = pkgs.writeText "agent-out-counter.nft" ''
     table inet ${outputCounterTable} {}
@@ -203,7 +125,6 @@ let
     };
   };
 
-  # --- 0. eval-time: the "proxy must be a different uid" corollary ------------
   evalWith =
     mod:
     import (pkgs.path + "/nixos/lib/eval-config.nix") {
@@ -249,16 +170,16 @@ let
   goodEvalClean = failedAssertions goodEval == [ ];
   sharedUidRejected = builtins.any (m: lib.hasInfix "must differ" m) (failedAssertions sharedUidEval);
 
-  # The nft ruleset the module generates must actually name the confined uid and
-  # end in a drop; checked here so a refactor that loses the rule fails at eval
-  # rather than turning subtest 3 into a slow mystery.
   lockdownUnit = goodEval.config.systemd.services."${name}-egress-lockdown".serviceConfig.ExecStart;
   lockdownRules = builtins.readFile (lib.last (lib.splitString " " lockdownUnit));
   rulesDropConfinedUid = lib.hasInfix "meta skuid ${toString confinedUid} drop" lockdownRules;
+  withEvalGates =
+    script:
+    assert goodEvalClean;
+    assert sharedUidRejected;
+    assert rulesDropConfinedUid;
+    script;
 in
-assert goodEvalClean;
-assert sharedUidRejected;
-assert rulesDropConfinedUid;
 pkgs.testers.runNixOSTest {
   name = "per-uid-egress-lockdown";
 
@@ -282,8 +203,6 @@ pkgs.testers.runNixOSTest {
           pkgs.util-linux
         ];
 
-        # An ordinary co-resident uid. Nothing about it is special; that is the
-        # point of subtest 4.
         users.groups.bystander = { };
         users.users.bystander = {
           uid = bystanderUid;
@@ -305,9 +224,6 @@ pkgs.testers.runNixOSTest {
               pkgs.coreutils
             ];
             stateMounts."/state" = ".";
-            # Three fetches in one real bubblewrap run: allowlisted via the
-            # inherited HTTPS_PROXY, non-allowlisted via the same proxy, and a
-            # deliberate proxy bypass by IP with --noproxy.
             command = ''
               curl -sS -f -k --max-time 20 https://allowed.test/ > /state/proxied-allowed.out 2> /state/proxied-allowed.err
               echo "exit=$?" >> /state/proxied-allowed.err
@@ -347,8 +263,6 @@ pkgs.testers.runNixOSTest {
         system.stateVersion = "25.05";
         networking.firewall.enable = false;
 
-        # The only resolver in the topology. The proxy uid is allowed to reach
-        # it (proxy.allowDns); the confined uid is not, which is subtest 6.
         services.dnsmasq = {
           enable = true;
           resolveLocalQueries = false;
@@ -364,7 +278,7 @@ pkgs.testers.runNixOSTest {
       };
   };
 
-  testScript = ''
+  testScript = withEvalGates ''
     CURL = "${pkgs.curl}/bin/curl"
     RUNUSER = "${pkgs.util-linux}/bin/runuser"
     PROXY = "http://127.0.0.1:${toString proxyPort}"

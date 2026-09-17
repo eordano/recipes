@@ -104,11 +104,6 @@ let
 
   install = wired.boot.loader.systemd-boot.extraInstallCommands;
 
-  # `qemu-vm.nix` replaces `fileSystems` wholesale with
-  # `mkVMOverride config.virtualisation.fileSystems`, so a VM test can NEVER
-  # observe a module's declared mounts. These four facts are therefore checked
-  # in a plain non-VM evaluation; the VM below mounts the two ESPs by hand with
-  # the same options this evaluation proves the module declares.
   evalChecks = {
     "primary device is mkForce'd over the disko-style definition" =
       wired.fileSystems.${espMount}.device == "/dev/disk/by-uuid/1111-AAAA";
@@ -137,21 +132,8 @@ let
 
   evalFailures = lib.attrNames (lib.filterAttrs (_: ok: !ok) evalChecks);
 in
-assert lib.assertMsg (evalFailures == [ ]) (
-  "eval-time checks failed: "
-  + lib.concatStringsSep "; " evalFailures
-  + lib.optionalString (failing wired != [ ]) ("\nwired assertions: " + msgs wired)
-);
 pkgs.testers.runNixOSTest {
   name = "systemd-boot-mirrored-esp";
-
-  # NOTE ON `lib/nixos-test-topology`: deliberately NOT used here. That library
-  # exists to take IP assignment away from the test framework for MULTI-NODE
-  # tests. This test has exactly one booted machine and no network traffic at
-  # all -- the extra `nodes` below are never started, they exist only so the
-  # test has three distinct `system.build.toplevel`s to build generations from.
-  # There is no subnet, no route and no forward hook to get wrong, so importing
-  # the topology library would add a dependency and buy nothing.
 
   nodes =
     let
@@ -165,8 +147,6 @@ pkgs.testers.runNixOSTest {
           boot.loader.efi.canTouchEfiVariables = true;
           system.switch.enable = true;
 
-          # Needed for machine-id to be persisted between reboots (upstream
-          # nixos/tests/systemd-boot.nix says the same).
           environment.etc."machine-id".text = "1234567890abcdef1234567890abcdef\n";
 
           environment.systemPackages = with pkgs; [
@@ -191,8 +171,6 @@ pkgs.testers.runNixOSTest {
           };
         };
 
-      # Never booted. `useBootLoader` is forced off so the test driver does not
-      # build a disk image for a VM that only exists to contribute a toplevel.
       variant = mods: {
         imports = [
           common
@@ -229,16 +207,16 @@ pkgs.testers.runNixOSTest {
           ];
         };
 
-      # Two extra system closures with DIFFERENT initrds, so that rolling past
-      # `configurationLimit` really orphans a kernel/initrd on the ESP instead
-      # of leaving the same file in the keep set forever (which would make the
-      # garbage-collection assertions vacuous). The initrd difference is
-      # asserted explicitly in the testScript.
       variantA = variant { boot.initrd.availableKernelModules = [ "loop" ]; };
       variantB = variant { boot.initrd.availableKernelModules = [ "dm_mod" ]; };
     };
 
   testScript =
+    assert lib.assertMsg (evalFailures == [ ]) (
+      "eval-time checks failed: "
+      + lib.concatStringsSep "; " evalFailures
+      + lib.optionalString (failing wired != [ ]) ("\nwired assertions: " + msgs wired)
+    );
     { nodes, ... }:
     let
       variantAsys = nodes.variantA.system.build.toplevel;

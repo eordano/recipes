@@ -1,65 +1,7 @@
-# NixOS VM test for the zfs-native-encryption-keys module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from a flake:
-#
-#   pkgs.callPackage ./modules/zfs-native-encryption-keys/test.nix { }
-#
-# What it proves:
-#
-#   0. (eval-time) `mounts` generates the exact `fileSystems` entry -- device,
-#      fsType and the `x-systemd.*` ordering options -- wired to the key unit.
-#      The generated value is then fed to the VM through
-#      `virtualisation.fileSystems`, because `qemu-vm.nix` replaces `fileSystems`
-#      wholesale with `mkVMOverride config.virtualisation.fileSystems`
-#      (nixos/modules/virtualisation/qemu-vm.nix:1413) and a VM test would
-#      otherwise never see a module's declared mounts at all. The mount unit the
-#      VM builds from it is asserted on at runtime.
-#   1. The unit UNLOCKS THE POOL ON THIS BOOT. The pool is exported and
-#      re-imported with `-N` by the setup scaffolding, so the key is genuinely
-#      unavailable when the unit runs: the test asserts the unit logged
-#      "loading key for ..." and did NOT take the "key already loaded" shortcut.
-#      Without that, `zpool create` leaves the key loaded and every downstream
-#      assertion passes against a module that does nothing.
-#   2. The pool's ON-DISK `keylocation` is `prompt`, so the unlock can only have
-#      come from `zfs load-key -L file://...` -- and `-L` does not rewrite the
-#      stored property afterwards.
-#   3. Datasets are genuinely available: mounted, writable, readable back.
-#   4. Locking is real. Mid-test the datasets are unmounted and the key
-#      unloaded; the data becomes inaccessible and `zfs mount -a` cannot bring
-#      it back. Restarting the unit alone restores it. This is the control that
-#      makes "available" mean something.
-#   5. Declared `mounts`: the generated `.mount` unit carries `Requires=` and
-#      `After=` the key unit, and mounts the dataset once the key is loaded.
-#   6. Consumers in `requiredBy` get `Requires=` + `After=`, and on the happy
-#      path actually run.
-#   7. `disableZfsMountService` masks `zfs-mount.service`; `mountAll` mounts the
-#      ZFS-managed datasets.
-#   8. It survives a reboot: pool comes back locked, unit unlocks it, data intact.
-#   9. Fail CLOSED, on BOTH key-delivery paths, with the pools present and
-#      imported so the failure is unambiguously about the key:
-#        - `useCredential = true`  -> systemd refuses to start the unit
-#          (243/CREDENTIALS).
-#        - `useCredential = false` -> the `preflight` check exits non-zero.
-#      In both cases the unit ends up `failed` with `ConditionResult=yes` (NOT
-#      "successfully skipped", which is what an obvious-looking
-#      `ConditionPathExists` fix would produce -- that is fail-OPEN), the
-#      datasets stay locked and unmounted, the declared mount refuses to mount,
-#      the `requiredBy` consumers never run, and the machine still reaches
-#      multi-user.target instead of hanging on a prompt nobody can answer.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
 
-  # Dogfoods lib/nixos-test-topology's `secretsStub` fixture: the key is
-  # delivered at the real secret provider's path convention
-  # (`config.age.secrets.<n>.path`), which is how this module is used in
-  # practice. `mkTopology` itself is deliberately NOT used here -- see README:
-  # the nodes in this test never exchange a packet, so there is no address
-  # assignment to take away from the framework.
   topology = import ../../lib/nixos-test-topology;
 
   passphrase = "test-encryption-passphrase";
@@ -72,10 +14,6 @@ let
   missingCredKey = "/run/agenix/lockedcred-key-that-never-appears";
   missingPlainKey = "/run/agenix/lockedplain-key-that-never-appears";
 
-  # --- 0. eval-time capture of the generated `fileSystems` wiring -------------
-  #
-  # A plain (non-VM) evaluation of the module, used both to assert the wiring
-  # and to hand the module's OWN generated mount definition to the VM nodes.
   evalPool =
     poolName: poolCfg:
     (import (pkgs.path + "/nixos/lib/eval-config.nix") {
@@ -98,8 +36,6 @@ let
       ];
     }).config;
 
-  # Exactly the attributes `mountsFor` sets, taken from a real evaluation of the
-  # module rather than re-typed by hand.
   generatedMounts =
     poolName: poolCfg:
     lib.mapAttrs (_: fs: { inherit (fs) device fsType options; }) (
@@ -150,12 +86,6 @@ let
         "x-systemd.after=zfs-load-key-testpool.service"
       ];
 
-  # The pools above all pass `mountOptions` explicitly, so they say nothing
-  # about what a user who takes the DEFAULT gets. That default is the one that
-  # can deadlock: a local-fs mount requiring an ordinary service closes
-  # local-fs.target -> mount -> service -> basic.target -> sysinit.target ->
-  # local-fs.target, and systemd resolves it by deleting jobs rather than
-  # failing, so every downstream assertion here would still pass.
   defaultWiredMount =
     (evalPool "defpool" {
       keyFile = keyPath;
@@ -195,7 +125,6 @@ pkgs.testers.runNixOSTest {
   name = "zfs-native-encryption-keys";
 
   nodes = {
-    # Happy path: pool exists, key file present at the secret provider's path.
     server =
       { config, lib, ... }:
       {
@@ -217,16 +146,8 @@ pkgs.testers.runNixOSTest {
         virtualisation.emptyDiskImages = [ 1024 ];
         virtualisation.memorySize = 2048;
 
-        # The module's own generated mount definition, routed around
-        # `qemu-vm.nix`'s wholesale `fileSystems` override.
         virtualisation.fileSystems = generatedMounts "testpool" serverPool;
 
-        # Scaffolding only: stands in for "the pool already exists", which on a
-        # real host is a one-off `zpool create` / disko run. It creates the pool
-        # with a file keylocation, flips the property to `prompt` (the same
-        # postCreateHook trick disko configs use, so the key path never survives
-        # on disk), and then EXPORTS and re-imports with `-N` so the key is
-        # genuinely unloaded by the time the module's unit runs.
         systemd.services.testpool-setup = {
           description = "Create or import the encrypted test pool";
           wantedBy = [ "multi-user.target" ];
@@ -266,8 +187,6 @@ pkgs.testers.runNixOSTest {
         systemd.services.zfs-consumer = markerUnit "zfs-consumer";
       };
 
-    # Fail-closed path, both key-delivery mechanisms, with the pools present and
-    # imported so a failure cannot be blamed on a missing pool.
     locked =
       { config, lib, ... }:
       {
@@ -283,8 +202,6 @@ pkgs.testers.runNixOSTest {
 
         virtualisation.fileSystems = generatedMounts "lockedcred" lockedCredPool;
 
-        # Scaffolding key, at a path the module never looks at. The module's
-        # keyFile points somewhere that will never exist.
         environment.etc."zfs-scaffolding-key" = {
           text = passphrase;
           mode = "0400";

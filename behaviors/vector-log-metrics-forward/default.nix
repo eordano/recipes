@@ -1,17 +1,3 @@
-# vector-log-metrics-forward
-#
-# A NixOS module that ships journald + nginx logs (and, optionally, Prometheus
-# metrics) off the box with Vector. The local journald is treated as a
-# short-retention *buffer* only -- the durable copy lives on one or more
-# upstream collectors. Events fan out to every upstream in parallel behind a
-# disk buffer, so whichever sink is reachable first wins.
-#
-# Drop into your host modules and set `behaviors.logs.useVector = true` plus an
-# `upstream`. Nothing here is host- or fleet-specific; every site value is an
-# option with a generic default.
-#
-# See README.md for the why and the traps.
-
 {
   config,
   lib,
@@ -32,9 +18,6 @@ let
       || config.services.prometheus.exporters.nut.enable
     );
 
-  # Build the VRL predicate that drops known-noisy journald lines *before* they
-  # fan out to every downstream transform. Each rule drops a message when it
-  # comes from `unit` AND its text contains `contains`. Empty list => pass all.
   dropNoisePredicate =
     if cfg.dropUnitNoise == [ ] then
       "true"
@@ -254,7 +237,7 @@ in
 
     vectorBufferMaxSize = mkOption {
       type = types.int;
-      default = 1073741824; # 1 GiB
+      default = 1073741824;
       description = "Maximum size of Vector's on-disk sink buffer, in bytes.";
     };
   };
@@ -274,7 +257,7 @@ in
     services.prometheus.exporters.node = mkIf cfg.enableMetrics {
       enable = true;
       port = 9100;
-      enabledCollectors = [
+      enabledCollectors = lib.mkDefault [
         "systemd"
         "processes"
         "filesystem"
@@ -285,7 +268,7 @@ in
         "diskstats"
         "zfs"
       ];
-      disabledCollectors = [
+      disabledCollectors = lib.mkDefault [
         "powersupplyclass"
       ];
     };
@@ -325,9 +308,6 @@ in
           current_boot_only = true;
         };
 
-        # Drop known-noisy journald lines once, up front, so the spam never
-        # reaches any downstream transform. This transform is the base
-        # "filtered journald" node every other journald consumer reads from.
         transforms.journald_filtered = {
           type = "filter";
           inputs = [ "journald" ];
@@ -592,9 +572,6 @@ in
                   max_size = cfg.vectorBufferMaxSize;
                   when_full = "block";
                 };
-            # One sink per upstream. Events fan out to ALL of them in parallel,
-            # each with its own buffer -- so a slow or down upstream never stalls
-            # the others, and whichever is reachable first carries the data.
             forwardLogs = lib.listToAttrs (
               map (u: {
                 name = "forward_logs_${sanitize u}";
@@ -642,18 +619,12 @@ in
       };
     };
 
-    # journald is deliberately a short-retention BUFFER: the durable copy lives
-    # upstream. Keep it small so a wedged upstream can't blow up local disk.
-    services.journald = {
-      extraConfig = ''
-        SystemMaxUse=${cfg.journaldMaxUse}
-        MaxRetentionSec=${toString cfg.journaldMaxRetentionSec}
-      '';
+    services.journald.settings.Journal = {
+      SystemMaxUse = lib.mkDefault cfg.journaldMaxUse;
+      MaxRetentionSec = lib.mkDefault cfg.journaldMaxRetentionSec;
     };
 
     systemd.services.vector = {
-      # Order Vector AFTER the GeoIP updater so it never starts against a
-      # missing or half-written mmdb.
       after = mkIf (cfg.enableGeoIP && cfg.geoipUpdaterService != null) [ cfg.geoipUpdaterService ];
       wants = mkIf (cfg.enableGeoIP && cfg.geoipUpdaterService != null) [ cfg.geoipUpdaterService ];
       serviceConfig = {
@@ -672,8 +643,6 @@ in
 
     virtualisation.docker.logDriver = mkIf config.virtualisation.docker.enable "journald";
 
-    # Open the receiver ports. If receiverInterface is set, restrict to that
-    # interface (e.g. a VPN interface) instead of exposing them everywhere.
     networking.firewall = mkIf cfg.enableLogReceiver (
       let
         ports = [ cfg.logsPort ] ++ (lib.optional cfg.enableMetrics cfg.metricsPort);

@@ -1,24 +1,4 @@
 # shellcheck shell=bash
-#
-# Client half of the drop-box: push a directory into a write-only SSH intake.
-#
-# Two rsync runs, in this order and never merged:
-#   1. the payload
-#   2. the sentinel, alone, AFTER run 1 has exited
-#
-# Merging them would defeat the whole point -- rsync gives no ordering guarantee
-# within one run, so the receiver could see the sentinel before the last file.
-#
-# Usage:
-#   drop-box-push --target user@host --id 1738000000-abc1234-myproject ./result
-#
-# Options:
-#   --target DEST     user@host of the receiver (or DROPBOX_TARGET)
-#   --id ID           drop id; 1..128 chars of [A-Za-z0-9._-], no leading dot
-#   --sentinel NAME   sentinel filename (default .done, or DROPBOX_SENTINEL)
-#   --port N          ssh port
-#   --dry-run         print the plan and exit
-#   -h, --help        this text
 
 set -euo pipefail
 LC_ALL=C
@@ -94,16 +74,12 @@ done
 [ -n "$FOLDER" ] || die "no folder given"
 [ -n "$ID" ] || die "no --id"
 
-# Mirror the receiver's rules so a bad id fails here, loudly, instead of
-# landing in quarantine ten seconds later.
 [ "${#ID}" -le 128 ] || die "id too long (${#ID} > 128)"
 case "$ID" in
   .* | */* | *[[:space:]]*) die "id must not start with '.' or contain '/' or whitespace" ;;
 esac
 [ -z "${ID//[A-Za-z0-9._-]/}" ] || die "id has characters outside [A-Za-z0-9._-]"
 
-# `nix build` leaves a symlink into a read-only store path; dereference it and
-# stage a writable copy so rsync does not try to preserve 0444 store modes.
 if [ -L "$FOLDER" ]; then
   FOLDER="$(readlink -f -- "$FOLDER")"
 fi
@@ -132,9 +108,6 @@ trap cleanup EXIT
 cp -rL -- "$FOLDER"/. "$STAGING"/
 chmod -R u+rwX -- "$STAGING"
 
-# The receiver chroots to incoming/, so the remote path is "<id>/", never
-# "incoming/<id>/". Explicit --chmod because the sender's umask must not
-# decide whether the receiver can read what it was given.
 rsync -a -e "$SSH_CMD" --no-owner --no-group \
   --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
   "$STAGING"/ "$TARGET:$ID/"

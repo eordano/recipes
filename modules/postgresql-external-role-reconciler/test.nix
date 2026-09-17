@@ -1,54 +1,3 @@
-# NixOS VM test for the postgresql-external-role-reconciler module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from a flake:
-#
-#   pkgs.callPackage ./modules/postgresql-external-role-reconciler/test.nix { }
-#
-# Two nodes, wired with lib/nixos-test-topology so neither of them carries a
-# framework-assigned phantom address:
-#
-#   db      runs PostgreSQL. Knows nothing about the reconciler.
-#   runner  runs the module. Runs NO PostgreSQL at all -- asserted, because
-#           "reconcile a server this host does not run" is the entire premise.
-#
-# One subnet is enough here: unlike a filtering test (README trap 4) there is no
-# forward hook to transit, and `db` being a different machine is exactly what
-# makes it external. The test asserts `inet_server_addr()` comes back as db's
-# topology address, so a psql that had silently fallen back to a local socket
-# would fail rather than pass.
-#
-# What it proves, and for each one what breaking the module would look like:
-#
-#   0. (eval-time) the identifier assertion rejects a role name that is not a
-#      bare SQL identifier, and accepts the config this test actually deploys.
-#   1. The role is created and AUTHENTICATES from the runner with the password
-#      that only ever existed in a 0400 root:root file -- a file the reconciler
-#      unit could not have read directly, since it runs as a DynamicUser and
-#      gets the bytes through LoadCredential. `nobody` is shown to be unable to
-#      read it.
-#   2. `clauses` landed: the role is NOSUPERUSER/NOCREATEDB/NOCREATEROLE/
-#      NOREPLICATION/LOGIN.
-#   3. `revokePublicConnect` landed: PUBLIC has no CONNECT on the database.
-#   4. The read-only grant is read-only in BOTH directions -- SELECT succeeds,
-#      and INSERT/UPDATE/DELETE/CREATE TABLE each fail with a permission error
-#      (asserted on the server's message, not merely on a non-zero exit).
-#      Sequences: SELECT works, nextval() does not.
-#   5. `defaultPrivilegesFrom` works: a table created by the owner role AFTER
-#      the reconcile is readable without re-running anything. Drop that option
-#      and this is the assertion that goes red -- `GRANT SELECT ON ALL TABLES`
-#      alone is a point-in-time snapshot.
-#   6. ROTATION: rewriting the key file alone changes nothing (control), and
-#      after a restart the OLD password is rejected with "password
-#      authentication failed" while the NEW one works and keeps every grant.
-#   7. ORDERING, causally: with both units stopped and the role's password
-#      drifted out-of-band on the server, the consumer's own probe command is
-#      shown to FAIL (control), and then `systemctl start` of the consumer
-#      alone succeeds -- because `Requires=`/`After=` pulled the reconciler in
-#      first and it repaired the credential before the consumer ran.
 { pkgs, ... }:
 let
   topoLib = import ../../lib/nixos-test-topology;
@@ -70,8 +19,6 @@ let
 
   pgPkg = pkgs.postgresql;
 
-  # Server-side bootstrap. This is the "someone else's database" half: it is
-  # deliberately NOT expressed with the module under test.
   initialScript = pkgs.writeText "external-db-initial.sql" ''
     ALTER ROLE postgres WITH PASSWORD '${superPw}';
   '';
@@ -83,7 +30,6 @@ let
     CREATE SEQUENCE IF NOT EXISTS pre_seq;
   '';
 
-  # --- 0. eval-time checks ---------------------------------------------------
   evalWith =
     roles:
     (import (pkgs.path + "/nixos/lib/eval-config.nix") {
@@ -115,15 +61,10 @@ let
 
   failing = cfg: builtins.filter (a: !a.assertion) cfg.assertions;
 
-  # The config this test deploys must be assertion-clean, ...
   goodOk = failing goodEval == [ ];
-  # ... and a role name that is not a bare identifier must be REJECTED, not
-  # quietly interpolated into the DDL.
   evilOk = builtins.any (
     a: pkgs.lib.hasInfix "SQL identifiers" a.message && pkgs.lib.hasInfix "DROP DATABASE" a.message
   ) (failing evilEval);
-  # The generated unit must take the secret through LoadCredential, never as a
-  # readable path baked into the script.
   wiredOk =
     let
       unit =
@@ -134,10 +75,13 @@ let
     unit.serviceConfig.LoadCredential == [ "password:/run/agenix/pg-password-reader" ]
     && unit.serviceConfig.DynamicUser
     && !(pkgs.lib.hasInfix "/run/agenix/pg-password-reader" unit.script);
+  withEvalGates =
+    script:
+    assert goodOk;
+    assert evilOk;
+    assert wiredOk;
+    script;
 in
-assert goodOk;
-assert evilOk;
-assert wiredOk;
 pkgs.testers.runNixOSTest {
   name = "postgresql-external-role-reconciler";
 
@@ -156,9 +100,6 @@ pkgs.testers.runNixOSTest {
           enableTCPIP = true;
           ensureDatabases = [ "appdb" ];
           inherit initialScript;
-          # Plain definition: sorts before the module's own mkAfter defaults, so
-          # this rule wins for the test subnet. Password auth, not trust --
-          # otherwise "the role can authenticate" would prove nothing.
           authentication = "host all all ${topo.cidr.lan} scram-sha-256";
         };
 
@@ -236,9 +177,6 @@ pkgs.testers.runNixOSTest {
           };
         };
 
-        # Stands in for the real workload. It authenticates as the reader with
-        # the same key file the reconciler drives, so "the consumer started"
-        # and "the credential was usable when it started" are the same event.
         systemd.services.appconsumer = {
           description = "Workload that must never run against a stale credential";
           wantedBy = [ "multi-user.target" ];
@@ -261,7 +199,7 @@ pkgs.testers.runNixOSTest {
       };
   };
 
-  testScript = ''
+  testScript = withEvalGates ''
     DBHOST = "${dbIp}"
     RUNNERIP = "${topo.ip.runner.lan}"
     SUPER = "${superPw}"

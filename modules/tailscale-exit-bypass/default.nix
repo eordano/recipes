@@ -1,37 +1,3 @@
-# tailscale-exit-bypass
-#
-# Selectively divert chosen egress (by CIDR, and optionally by dport) OFF a
-# Tailscale exit node and back onto the host's own WAN, using an fwmark +
-# policy-routing rule plus a small nftables ruleset.
-#
-# Why this is subtle (the three traps this module exists to solve):
-#
-#   1. `type route hook output` -- a plain `output` mangle chain marks the
-#      packet but does NOT force the kernel to re-run the route lookup. Sockets
-#      that connect() early and cache their destination route (notably
-#      QEMU/SLIRP and other UDP sockets) never see the new mark's route. The
-#      `route` hook triggers a route re-lookup after the mark is set, so those
-#      cached-dest sockets actually get diverted.
-#
-#   2. MASQUERADE on the marked flow -- the same early-connect() sockets also
-#      cache their SOURCE address, chosen while the route still pointed at the
-#      tailscale interface (a tailnet/CGNAT src). After we flip egress to WAN,
-#      packets would leave with a now-wrong tailnet src and replies get dropped
-#      as bogons. MASQUERADE on the marked flow rewrites src to the outgoing
-#      interface address.
-#
-#   3. ip rule priority -- the diverting rule must sit BELOW tailscale's rule
-#      window (~5210-5290) so it is consulted first. It targets the `main`
-#      table, which still holds the real WAN default, because tailscale's exit
-#      default route lives in a separate table (commonly 52), not in `main`.
-#
-# Failure mode is fail-OPEN: if the rules are absent, traffic falls back to the
-# host default route (the tailscale exit). No IP leak, just the un-bypassed
-# path. For fail-closed behaviour, add your own REJECT in a parallel nft table.
-#
-# This module is self-contained: import it, set `enable = true`, and declare
-# one or more named `routes`.
-
 {
   config,
   lib,

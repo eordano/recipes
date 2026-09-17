@@ -1,15 +1,3 @@
-# bitcoind-in-nspawn-container
-#
-# Run an internet-facing bitcoind inside a privateNetwork systemd-nspawn
-# container, with the chain data bind-mounted from the host so a full sync
-# survives container rebuilds. The service user is declared with the SAME
-# uid/gid on BOTH sides of the bind mount so on-disk ownership stays valid
-# across the container boundary.
-#
-# Import this module and set `services.bitcoindContainer.enable = true;`.
-#
-# See README.md for the traps this encodes (shutdown timeout, DNS, W^X).
-
 {
   config,
   lib,
@@ -20,8 +8,6 @@ with lib;
 let
   cfg = config.services.bitcoindContainer;
 
-  # bitcoind's own CLI convention for booleans is 1/0, NOT true/false -- it
-  # does not parse the words "true"/"false" as a boolean at all.
   settingValueToStr =
     v:
     if isBool v then
@@ -33,8 +19,6 @@ let
     else
       throw "services.bitcoindContainer.settings: unsupported value type (${builtins.typeOf v}) for a setting; use bool, int, str, or a list of those";
 
-  # A list value repeats the flag once per element, matching bitcoind's
-  # convention for "list" args such as -rpcallowip/-connect/-addnode.
   settingsToArgs =
     settings:
     concatLists (
@@ -227,8 +211,6 @@ in
   };
 
   config = mkIf cfg.enable {
-    # Host-side declaration of the service user. Declared with the same uid/gid
-    # as inside the container so the bind-mounted data has consistent ownership.
     users = {
       users.${cfg.name} = {
         inherit (cfg) uid;
@@ -246,8 +228,6 @@ in
 
     containers.${cfg.name} = {
       autoStart = true;
-      # privateNetwork gives the container its own network namespace: the
-      # internet-facing daemon cannot reach the host's other services.
       privateNetwork = true;
       inherit (cfg.containerNetwork) hostAddress localAddress;
 
@@ -263,16 +243,9 @@ in
             [
               "-server"
               "-rpcport=${toString cfg.rpc.port}"
-              # Without -rpcbind, -rpcallowip alone makes bitcoind bind RPC on ALL
-              # container interfaces (0.0.0.0/::) and act only as an IP filter. Bind
-              # explicitly to loopback + the container-side veth (the address the
-              # host reaches RPC on) so the socket is not exposed on every address.
               "-rpcbind=127.0.0.1"
               "-rpcbind=${cfg.containerNetwork.localAddress}"
             ]
-            # -rpcallowip is repeatable and each value parses as ONE subnet
-            # spec; there is no comma-separated form. Emit one flag per entry,
-            # exactly as settingsToArgs does for list-valued settings.
             ++ map (ip: "-rpcallowip=${ip}") cfg.rpc.allowedIPs
           )
           ++ settingsToArgs cfg.settings
@@ -282,7 +255,6 @@ in
           nixpkgs.pkgs = pkgs;
           system.stateVersion = "24.05";
 
-          # Same uid/gid as the host user -- this is the whole point.
           users.users.${cfg.name} = {
             inherit (cfg) uid;
             isSystemUser = true;
@@ -293,9 +265,6 @@ in
           users.groups.${cfg.name}.gid = cfg.gid;
 
           networking = {
-            # With privateNetwork the container has no inherited resolver. Its
-            # only route out is the host side of the veth, so point DNS there;
-            # the host must actually resolve for it.
             nameservers = [ cfg.containerNetwork.hostAddress ];
             firewall = {
               enable = true;
@@ -315,7 +284,6 @@ in
               ExecStart = "${cfg.package}/bin/bitcoind ${concatStringsSep " " bitcoindArgs}";
               Restart = "on-failure";
               TimeoutStartSec = "0";
-              # Give bitcoind time to flush the UTXO set on stop -- see option doc.
               TimeoutStopSec = toString cfg.stopTimeoutSec;
 
               PrivateTmp = true;

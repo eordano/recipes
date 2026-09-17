@@ -1,62 +1,9 @@
-# NixOS VM test for the patroni-leader-proxy module.
-#
-# Run it standalone (no flake needed):
-#
-#   nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
-#
-# or from the flake: `nix build .#checks.x86_64-linux.patroni-leader-proxy`.
-#
-# WHAT IS FAKED, AND WHY. The module's entire job is "route the client to
-# whichever node currently answers `GET /primary` with 200". A real Patroni
-# cluster contributes nothing to that question except latency and flakiness: to
-# exercise a failover you would have to provoke a real leader election and then
-# wait for it. So the backends here are ~60 lines of Python that mimic the two
-# things HAProxy actually observes about a Patroni member:
-#
-#   * a REST API on `restApiPort` where `/primary` returns 200 only when this
-#     node's role file says "primary", and `/replica` returns 200 only when it
-#     says "replica" -- the same 200/503 contract the module health-checks;
-#   * a TCP listener on `pgPort` standing in for PostgreSQL, which answers every
-#     accepted connection with its OWN NODE NAME and counts how many connections
-#     it has served.
-#
-# Flipping leadership is then `echo primary > /run/fakepatroni/role` -- instant,
-# deterministic, and repeatable in both directions.
-#
-# HOW ROUTING IS MEASURED. Never from the proxy's own view of the world. Each
-# proxied connection is identified two independent ways, both at the BACKEND:
-#
-#   1. the banner the client reads back is written by the backend that accepted
-#      the connection, and
-#   2. that backend's own connection counter (read over its REST port, not
-#      through the proxy) is asserted to have moved by exactly one while every
-#      other backend's counter is asserted not to have moved at all.
-#
-# "The proxy is listening" and "the proxy answered" are deliberately never
-# accepted as evidence of where a connection went.
-#
-# THE ASSERTION THAT MATTERS is `NO LEADER`: with every backend reporting 503 on
-# /primary, the proxy must refuse the connection rather than quietly hand a
-# write session to a replica. That subtest is paired with a falsification leg --
-# promote one node, re-run the identical command, require it to succeed and to
-# land on the promoted node -- because a proxy that is simply broken and refuses
-# everything would otherwise pass it.
 { pkgs, ... }:
 let
   inherit (pkgs) lib;
 
   topology = import ../../lib/nixos-test-topology;
 
-  # Two subnets, and every host's address declared explicitly, so no assertion
-  # below can be undone by the framework's alphabetical-rank address scheme.
-  # `mgmt` exists purely so `bindAddresses` has an address it must NOT bind:
-  # a bind test on a single-homed host cannot distinguish "bound where I asked"
-  # from "bound everywhere".
-  #
-  # Interface names are outside the kernel's own `ethN` namespace on purpose.
-  # The multi-homed nodes carry a vlan-1 and a vlan-2 leg; leaving the default
-  # `eth<vlan>` names in place makes udev rename eth1 -> eth1/eth2 in an order
-  # that can collide, and the loser boots with a leg silently unconfigured.
   topo = topology.mkTopology {
     subnets = {
       db = {
@@ -105,15 +52,6 @@ let
   ];
   nodeAddresses = lib.genAttrs backends (n: topo.ip.${n}.db);
 
-  # A stand-in Patroni member. The REST half implements the 200/503 role
-  # contract the module health-checks; the TCP half stands in for PostgreSQL and
-  # is what makes "which backend served this connection" answerable at all.
-  #
-  # The PG half reads before it writes. The client always speaks first, so the
-  # exchange is a strict request/response: a server that answered and closed
-  # while unread bytes were still inbound would RST the connection, and an RST
-  # discards data already sitting in the peer's receive buffer -- i.e. the
-  # banner could vanish on a socket that had in fact been routed correctly.
   fakePatroniPy = pkgs.writeText "fake-patroni.py" ''
     import http.server
     import socketserver
@@ -195,10 +133,6 @@ let
     api.serve_forever()
   '';
 
-  # Connect through the proxy and report which backend answered. Exits non-zero
-  # both when the connection is refused outright and when it is accepted and
-  # then closed with nothing behind it -- which is how HAProxy in TCP mode
-  # rejects a session whose pool holds no live server.
   pgpingPy = pkgs.writeText "pgping.py" ''
     import socket
     import sys
@@ -241,12 +175,6 @@ let
     exec ${pkgs.python3}/bin/python3 ${pgpingPy} "$@"
   '';
 
-  # `pgstable HOST PORT WANT [N]` -- N consecutive connections must ALL land on
-  # WANT. A single probe hitting the right backend proves nothing while the
-  # other backends are still in the pool: HAProxy considers a checked server UP
-  # until `fall` checks have failed, so right after a role flip a round-robin
-  # pool still contains stale members and one lucky probe would look like a
-  # completed failover.
   pgstable = pkgs.writeShellScriptBin "pgstable" ''
     host=$1
     port=$2
@@ -264,8 +192,6 @@ let
     echo "$want"
   '';
 
-  # `pgnot HOST PORT UNWANTED [N]` -- the settling gate for the read pool: N
-  # consecutive connections must all succeed and none may land on UNWANTED.
   pgnot = pkgs.writeShellScriptBin "pgnot" ''
     host=$1
     port=$2
@@ -331,10 +257,6 @@ let
       system.stateVersion = "25.05";
     };
 
-  # The module under test, tuned for a VM: `inter 1s fall 2 rise 1` makes a
-  # role flip observable in ~2s instead of the WAN-safe 25s the defaults buy.
-  # The defaults themselves are asserted at eval time below, so shortening them
-  # here cannot hide a regression in them.
   proxyNode =
     {
       selfAddress,
@@ -363,13 +285,6 @@ let
       };
     };
 
-  # ---- eval-time: the tuning options must reach the generated backend config --
-  #
-  # Timing options are asserted here rather than in the VM on purpose: proving
-  # `fall 7` by measuring how long a pool takes to drain is a race against the
-  # test host's load, and a test that sleeps is a test that flakes. What the
-  # module owes its user is that the numbers land in the config; HAProxy owns
-  # what it does with them.
   evalHaproxyConfig =
     settings:
     (import (pkgs.path + "/nixos/lib/eval-config.nix") {
@@ -415,9 +330,6 @@ let
 
   occurrences = needle: hay: (builtins.length (lib.splitString needle hay)) - 1;
 
-  # Every tuned value is checked BOTH for presence and for the absence of the
-  # default it replaced, so an option silently stopping at the module boundary
-  # (hardcoded value, dropped interpolation) cannot pass.
   cfgChecks = [
     {
       ok = occurrences "default-server init-state down inter 11s fall 7 rise 3" tunedCfg == 2;
@@ -464,9 +376,6 @@ let
       msg = "the documented WAN-tolerant defaults (inter 5s fall 5 rise 2) changed";
     }
     {
-      # HAProxy's own default is to hold a checked server UP until a check
-      # fails, which would put every node in the RW pool for checkInter *
-      # checkFall after start and round-robin a write onto a replica.
       ok = occurrences "init-state down" defaultCfg == occurrences "default-server" defaultCfg;
       msg = "a pool's default-server lost `init-state down`; the RW pool would accept writes on replicas for the first checkInter*checkFall after HAProxy starts";
     }
@@ -535,7 +444,6 @@ pkgs.testers.runNixOSTest {
       ];
     };
 
-    # The default shape: read-write pool only, no readPort.
     proxy = {
       imports = [
         topo.nodes.proxy
@@ -543,9 +451,6 @@ pkgs.testers.runNixOSTest {
       ];
     };
 
-    # The same module with the optional replica pool switched on. A second host
-    # rather than a second port on `proxy`, so that "readPort is absent when
-    # unset" can be asserted on a live system and not only at eval time.
     roproxy = {
       imports = [
         topo.nodes.roproxy

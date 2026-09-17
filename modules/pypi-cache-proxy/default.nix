@@ -1,9 +1,3 @@
-# pypi-cache-proxy -- a two-layer caching proxy for PyPI.
-#
-# proxpi (Flask under gunicorn on localhost) is the inner proxy; nginx wraps
-# it with a larger disk-backed cache. The outage resilience lives entirely in
-# the nginx layer -- see the README for why. This module is self-contained:
-# drop it into your modules list and set `enable = true` plus a `domain`.
 {
   config,
   lib,
@@ -14,9 +8,6 @@ with lib;
 let
   cfg = config.modules.services.pypi-cache;
 
-  # proxpi is not in nixpkgs, so it is built inline here. `pythonRelaxDeps`
-  # strips proxpi's exact lxml pin so nixpkgs' lxml satisfies it without a
-  # source rebuild of lxml.
   proxpiEnv = pkgs.python3.withPackages (
     ps: with ps; [
       ps.flask
@@ -113,7 +104,7 @@ in
 
     proxpiCacheSize = mkOption {
       type = types.int;
-      default = 5368709120; # 5 GiB
+      default = 5368709120;
       description = "Inner proxpi package cache size, in bytes.";
     };
 
@@ -182,7 +173,6 @@ in
         Restart = "always";
         RestartSec = "10s";
 
-        # Hardening. proxpi only needs to read/write its own cache dir.
         PrivateTmp = true;
         ProtectSystem = "strict";
         ProtectHome = true;

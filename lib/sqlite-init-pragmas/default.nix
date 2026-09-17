@@ -1,24 +1,3 @@
-# sqlite-init-pragmas
-#
-# Run a pragma + schema stream against a sqlite database without losing the
-# schema.
-#
-# `sqlite3 -bail -cmd 'PRAGMA ...;' db.sqlite <statements>` runs the pragma and
-# then exits 0 WITHOUT running the statements -- whether they arrive as a
-# trailing argument, on stdin, or through a trailing `.read`. See README.md for
-# the reproducer and the upstream source line that does it.
-#
-# So: never `-cmd`. The pragmas are prepended to the statement stream and the
-# whole thing goes in on stdin as ordinary SQL, in one connection, with one exit
-# status.
-#
-#   init = (import ./lib/sqlite-init-pragmas { inherit pkgs; }).mkSqliteInit {
-#     name = "app-db-init";
-#     database = "/var/lib/app/app.db";
-#     sqlFiles = [ ./schema.sql ];
-#   };
-#   # -> a package; run `${init}/bin/app-db-init [database]`.
-
 {
   pkgs,
   lib ? pkgs.lib,
@@ -35,8 +14,6 @@ let
     optionalString
     ;
 
-  # `PRAGMA x = ON;` reads better than `= 1` and sqlite accepts both. Ints and
-  # strings pass through untouched so any pragma value is expressible.
   renderValue =
     v:
     if v == true then
@@ -52,10 +29,6 @@ let
     journal_mode = "WAL";
   };
 
-  # -bail: stop at the first failing statement instead of applying the rest of
-  #        the schema on top of a broken step.
-  # -noinit: do not consult an rc file; a schema init must not depend on
-  #        whatever ambient config the invoking user happens to have.
   defaultFlags = [
     "-bail"
     "-noinit"
@@ -74,10 +47,6 @@ let
       directoryMode ? "0755",
     }:
     let
-      # The whole point of the recipe. Passing a pragma here would silently
-      # discard everything below it.
-      # sqlite3 strips one leading dash before matching (src/shell.c.in:13345),
-      # so `--cmd` is the same option and must be rejected too.
       guard =
         if elem "-cmd" flags || elem "--cmd" flags then
           throw (
@@ -88,8 +57,6 @@ let
         else
           x: x;
 
-      # Pragmas first, and OUTSIDE any transaction: `PRAGMA journal_mode = WAL`
-      # fails inside one, and `PRAGMA foreign_keys` is a silent no-op inside one.
       pragmaFile = pkgs.writeText "${name}-pragmas.sql" (
         concatStringsSep "\n" (mapAttrsToList (n: v: "PRAGMA ${n} = ${renderValue v};") pragmas) + "\n"
       );
@@ -121,7 +88,6 @@ let
       }
     );
 
-  # Same arguments, wrapped as a value for `systemd.services.<name>`.
   mkSqliteInitService =
     args@{
       name ? "sqlite-init",
@@ -150,11 +116,6 @@ let
       // (args.serviceConfig or { });
     };
 
-  # Regression test for the behaviour the README describes. Build with:
-  #
-  #   nix build --impure --expr '
-  #     let pkgs = import <nixpkgs> {}; in
-  #     (import ./lib/sqlite-init-pragmas { inherit pkgs; }).tests.cmdSuppression'
   tests.cmdSuppression =
     pkgs.runCommand "sqlite-init-pragmas-test"
       {

@@ -1,44 +1,12 @@
-# agenix-encrypt-to-master
-#
-# Import an *existing* plaintext secret into an agenix-rekey tree by encrypting
-# it to your fleet's master recipients -- without evaluating the flake.
-#
-# The recipients (`masterPubkeys`) are scraped out of the generated rules file
-# with `sed`, not read via a Nix evaluation. That makes encryption fast and,
-# crucially, lets it work *before any host evaluates* -- e.g. while you are still
-# bootstrapping and no machine config has been built yet.
-#
-# Usage (from a `callPackage`):
-#
-#   agenix-encrypt-to-master = pkgs.callPackage ./agenix-encrypt-to-master { };
-#
-# then:
-#
-#   agenix-encrypt-to-master my-secret ./plaintext        # from a file
-#   printf %s "$TOKEN" | agenix-encrypt-to-master my-secret # from stdin
-#
-# See README.md for the rules-file contract and caveats.
 {
   writeShellApplication,
   age,
   gnused,
 
-  # Extra tools placed on the script's PATH. Encrypting *to* a plugin-format
-  # recipient (e.g. an `age1yubikey1...` master key) requires the matching age
-  # plugin binary here -- for a YubiKey master identity set
-  # `extraRuntimeInputs = [ age-plugin-yubikey ];`. Plain `age1...` recipients
-  # (a passphrase- or ssh-derived master key) need nothing extra, so this
-  # defaults to empty.
   extraRuntimeInputs ? [ ],
 
-  # Relative path (from the repo root) to the agenix-rekey rules file holding
-  # the `masterPubkeys = [ "age1..." ... ];` block. Overridable at runtime with the
-  # RULES_FILE environment variable (absolute path).
   rulesPath ? "secrets/rules.nix",
 
-  # Relative path (from the repo root) to the directory where `<name>.age`
-  # files are written. Overridable at runtime with the SECRETS_DIR environment
-  # variable (absolute path).
   secretsDir ? "secrets",
 }:
 writeShellApplication {

@@ -1,36 +1,3 @@
-# Signed HTTPS binary cache for a NixOS store.
-#
-# Exposes the local Nix store as a *signed* binary cache over HTTPS
-# (nix-serve-ng behind nginx) so other machines can add this host to their
-# `nix.settings.substituters` and pull pre-built derivations instead of
-# recompiling.
-#
-# The interesting part is the caching policy: store paths are content
-# hashes, so a path that exists never changes. That makes it safe to serve
-# every response with `Cache-Control: public, immutable` and a year-long
-# `proxy_cache_valid`, letting any downstream proxy/CDN hold responses
-# indefinitely. `secretKeyFile` is what makes those cached responses
-# trustworthy: nix-serve signs every narinfo, and `require-sigs` clients
-# accept the cache only if the matching public key is in their
-# `trusted-public-keys`.
-#
-# Usage:
-#   imports = [ ./signed-binary-cache ];
-#   services.signedBinaryCache = {
-#     enable        = true;
-#     domain        = "cache.example.com";
-#     secretKeyFile = "/run/secrets/cache-priv-key.pem";
-#   };
-#
-# Generate the signing keypair once (keep the private half secret, publish
-# the public line so clients can trust the cache):
-#   nix-store --generate-binary-cache-key cache.example.com-1 \
-#     cache-priv-key.pem cache-pub-key.pem
-#
-# Clients then add:
-#   nix.settings.substituters        = [ "https://cache.example.com" ];
-#   nix.settings.trusted-public-keys = [ "cache.example.com-1:<contents of cache-pub-key.pem>" ];
-
 {
   config,
   lib,
@@ -123,11 +90,6 @@ in
     services.nix-serve = {
       enable = true;
       inherit (cfg) port secretKeyFile bindAddress;
-      # nix-serve-ng is the Haskell rewrite: a faster, drop-in replacement for
-      # the original Perl nix-serve. The nixpkgs default for
-      # `services.nix-serve.package` is still the original, so opt in here.
-      # mkDefault lets you swap back with
-      # `services.nix-serve.package = pkgs.nix-serve;`.
       package = lib.mkDefault pkgs.nix-serve-ng;
     };
 

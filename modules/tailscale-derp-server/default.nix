@@ -1,23 +1,3 @@
-# Self-hosted Tailscale DERP relay behind nginx.
-#
-# Wraps Tailscale's `derper` binary in a hardened systemd service, feeds it
-# ACME-managed certificates via `-certmode=manual`, and (unless it runs
-# directly on 443) fronts it with nginx so the relay is reachable on the
-# standard HTTPS port. See README.md for the why and the traps.
-#
-# Usage:
-#   imports = [ ./modules/tailscale-derp-server ];
-#   services.derp-server = {
-#     enable   = true;
-#     hostname = "derp.example.com";  # must match the served TLS cert
-#     # acmeHost = "example.com";     # optional: which ACME cert dir to read
-#     # port     = 8443;              # derper's own listener (nginx proxies 443 -> this)
-#     # stunPort = 3478;
-#     # verifyClients = true;         # gate to your tailnet
-#   };
-#
-# You must arrange the ACME certificate yourself, e.g.:
-#   security.acme.certs."derp.example.com".group = "nginx";
 {
   config,
   lib,
@@ -29,17 +9,11 @@ let
 
   derper = pkgs.tailscale.derper;
 
-  # Whether nginx fronts derper. When derper listens directly on 443 there is
-  # no reverse proxy, so the nginx vhost + abuse filtering are irrelevant.
   useNginx = cfg.port != 443;
 
-  # Directory under /var/lib/acme that holds fullchain.pem / key.pem.
   acmeDir = if cfg.acmeHost != null then cfg.acmeHost else cfg.hostname;
   acmeCertPath = "/var/lib/acme/${acmeDir}";
 
-  # The group that owns the ACME material. Nothing here runs as root, so the
-  # relay reads its certificate purely through group membership -- which means
-  # this group has to be right, and is asserted below rather than assumed.
   acmeCert = config.security.acme.certs.${acmeDir} or null;
   certGroup =
     if cfg.acmeGroup != null then
@@ -185,15 +159,6 @@ in
         Restart = "always";
         RestartSec = 5;
 
-        # Runs as the service user, NOT root: `StateDirectory` already creates
-        # /var/lib/derper owned by it, and the certificate is reached through
-        # group membership. Polls first because the ACME files can lag the
-        # acme-finished target, then symlinks them to the <hostname>.crt/.key
-        # names derper expects.
-        #
-        # The readability test is the real thing rather than a root-side `su`
-        # emulation of it, so a group misconfiguration fails the unit here with
-        # a precise message instead of surfacing later as a TLS handshake error.
         ExecStartPre = pkgs.writeShellScript "derper-cert-links" ''
           set -euo pipefail
 
@@ -218,14 +183,6 @@ in
           ln -sfn "${acmeCertPath}/key.pem" "/var/lib/derper/${cfg.hostname}.key"
         '';
 
-        # -http-port=-1 disables plain HTTP; -certmode=manual reads the
-        # symlinked ACME cert instead of derper's LetsEncrypt autocert.
-        # Always bind all interfaces: derper reuses the -a host part for its
-        # STUN listener, so a loopback bind (as used before for the
-        # nginx-fronted path) silently binds STUN to 127.0.0.1 too -- clients
-        # then can't measure the region and the whole tailnet homes to one
-        # relay. The backend HTTPS port stays unreachable on the nginx path
-        # because the firewall only opens 80/443; STUN must be public.
         ExecStart = "${derper}/bin/derper -c=/var/lib/derper/derper.key -hostname=${cfg.hostname} -a=:${toString cfg.port} -http-port=-1 -stun-port=${toString cfg.stunPort} -certmode=manual -certdir=/var/lib/derper ${lib.optionalString cfg.verifyClients "-verify-clients"}";
 
         StateDirectory = "derper";
@@ -239,7 +196,6 @@ in
         NoNewPrivileges = true;
         ReadOnlyPaths = [ "/var/lib/acme" ];
         ReadWritePaths = [ "/var/lib/derper" ];
-        # Ambient cap lets the unprivileged user bind low STUN/relay ports.
         AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
         CapabilityBoundingSet = [ "CAP_NET_BIND_SERVICE" ];
       };
@@ -271,14 +227,10 @@ in
     ];
 
     users.groups.${cfg.group} = { };
-    # Pin nginx gid so it is stable on hosts that don't otherwise define it.
     users.groups.nginx = lib.mkIf useNginx (lib.mkDefault { gid = 60; });
     users.users.${cfg.user} = {
       isSystemUser = true;
       inherit (cfg) group;
-      # Read access to the ACME material comes from joining whichever group owns
-      # it -- derived from the cert definition rather than assumed to be nginx,
-      # because that only happens to be true when a web server provisions it.
       extraGroups = lib.optional (certGroup != null) certGroup;
     };
 
@@ -320,8 +272,6 @@ in
     services.nginx.virtualHosts.${cfg.hostname} = lib.mkIf useNginx (
       let
         upstream = "https://127.0.0.1:${toString cfg.port}";
-        # Backend SSL verification off (derper serves a cert for `hostname` on
-        # loopback); buffering off so relay streams don't stall.
         sharedProxyConfig = ''
           proxy_ssl_verify off;
           proxy_ssl_protocols TLSv1.2 TLSv1.3;
@@ -354,15 +304,12 @@ in
       {
         forceSSL = true;
         useACMEHost = acmeDir;
-        # HTTP/2 OFF: DERP uses HTTP/1.1 Upgrade semantics.
         http2 = false;
         extraConfig = ''
           server_tokens off;
           access_log /var/log/nginx/derp-access.log combined;
           error_log /var/log/nginx/derp-error.log warn;
         '';
-        # Enumerate only real DERP endpoints; everything else returns 444
-        # (connection closed, no response) so the box isn't a probe target.
         locations = {
           "= /derp" = upgradeLocation;
           "= /derp/probe" = plainLocation;

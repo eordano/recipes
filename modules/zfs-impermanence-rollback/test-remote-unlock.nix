@@ -1,15 +1,3 @@
-# Lifecycle test: first install -> remote unlock from the initrd over SSH ->
-# key login -> wipe reboot -> unlock and log in AGAIN with the same pinned keys.
-#
-# The point is not that any single step works. It is that the SSH identities
-# survive the wipe. Under impermanence there are TWO of them and they are
-# separate: the initrd's host key (used by whoever unlocks the disk) and the
-# running system's host key (used by everything afterwards). Lose either to a
-# rollback and the machine is unreachable exactly when you need it -- the
-# initrd one is worse, because the only way in is the thing that broke.
-#
-# Every SSH step below pins the key it expects via UserKnownHostsFile, so a
-# regenerated identity fails the test instead of quietly reconnecting.
 { pkgs, ... }:
 let
   pool = "tank";
@@ -45,26 +33,14 @@ pkgs.testers.runNixOSTest {
           {
             imports = [ ./default.nix ];
 
-            # Only the WIPED configuration holds in the initrd. Putting the
-            # backdoor on the base config would hang the disk-image build,
-            # which boots a VM of that config to install the bootloader and
-            # then waits for it to finish -- it never would.
             testing.initrdBackdoor = true;
 
-            # Boot-from-SSH: the initrd brings up the network and an sshd whose
-            # host identity is pinned to a fixed key, so the client can verify
-            # the machine it is about to unlock.
             boot.initrd.network = {
               enable = true;
               ssh = {
                 enable = true;
                 port = 22;
                 authorizedKeys = [ (lib.readFile ./test-keys/client.pub) ];
-                # On the PERSISTED dataset, not on the wiped root. The module
-                # asserts this, and the assertion is not pedantry: the initrd
-                # secrets are assembled at activation, so a key on the wiped
-                # path survives until the next `switch-to-configuration boot`
-                # and then fails the deploy outright.
                 hostKeys = [ "/persist/initrd-ssh-host-key" ];
               };
             };
@@ -89,9 +65,6 @@ pkgs.testers.runNixOSTest {
               };
             };
 
-            # The running system's own SSH identity lives on the persisted
-            # dataset. This is the line that decides whether the first wipe
-            # reboot locks you out.
             services.openssh = {
               enable = true;
               settings.PermitRootLogin = "prohibit-password";
