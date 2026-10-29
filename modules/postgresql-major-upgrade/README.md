@@ -1,14 +1,14 @@
 # postgresql-major-upgrade
 
 A NixOS module that performs a **PostgreSQL major-version upgrade by dump and
-restore**, as a systemd unit ordered *before* `postgresql.service`. It works
+restore**, as a systemd unit ordered before `postgresql.service`. It works
 between any two majors your nixpkgs provides (17 -> 18, 15 -> 18, ...); the old
 binaries are selected automatically from the on-disk `PG_VERSION`.
 
 ## The problem
 
 On NixOS, `services.postgresql.dataDir` defaults to
-`/var/lib/postgresql/$psqlSchema` -- a *version-specific* path. Bump
+`/var/lib/postgresql/$psqlSchema` -- a version-specific path. Bump
 `services.postgresql.package` from 17 to 18 and nothing appears to break:
 postgres starts, initialises a brand-new empty cluster under the new path, and
 your data is still sitting untouched in the old directory. Applications come up
@@ -19,7 +19,7 @@ Pin `dataDir` to a stable path instead and you get the honest failure: postgres
 refuses to start, because a 17 cluster is not readable by an 18 server.
 
 Neither is an upgrade. An upgrade needs someone to move the data across, and it
-needs to happen **before** anything can connect to a half-migrated cluster.
+needs to happen before anything can connect to a half-migrated cluster.
 
 ## What this does
 
@@ -32,28 +32,28 @@ not match its package. That holds even if this unit is masked, disabled, or
 never ran -- and because the unit is only `Wants=`, re-running the upgrade by
 hand never drags a healthy database offline.
 
-1. **Detect.** Compare `$dataDir/PG_VERSION` against the configured package. If
+1. Detect. Compare `$dataDir/PG_VERSION` against the configured package. If
    they match, or there is no cluster yet, exit immediately. Refuses to run
    "downgrades" where the on-disk cluster is newer than the package.
-2. **Back up all data.** Start the *old* server with `listen_addresses=''` and a
+2. Back up all data. Start the old server with `listen_addresses=''` and a
    private socket directory -- no TCP, and not on the socket path clients use --
-   then `pg_dumpall` with the *new* `pg_dumpall` (the supported direction for
+   then `pg_dumpall` with the new `pg_dumpall` (the supported direction for
    cross-version dumps). The dump is rejected unless it ends with postgres's own
    completion marker, so a truncated dump can never be mistaken for a good one.
    A manifest of databases, extensions and per-database relation counts is
    captured at the same time.
-3. **Take the old version down** cleanly (`pg_ctl -m fast`), then *rename* the
+3. Take the old version down cleanly (`pg_ctl -m fast`), then rename the
    old data directory aside rather than deleting it.
-4. **Bring the new version up without connectivity.** `initdb` reusing the old
+4. Bring the new version up without connectivity. `initdb` reusing the old
    cluster's encoding, collation and ctype, then start it -- again with no TCP
    and on the private socket.
-5. **Restore locally**, with `ON_ERROR_STOP=1`.
-6. **Collation.** Refresh each database's recorded collation version. A
+5. Restore locally, with `ON_ERROR_STOP=1`.
+6. Collation. Refresh each database's recorded collation version. A
    dump/restore rebuilds every index from scratch, so text ordering already
-   matches the running glibc; what remains is the stale *version stamp* that
+   matches the running glibc; what remains is the stale version stamp that
    otherwise produces "collation version mismatch" warnings. `reindex = true`
    additionally runs `reindexdb` as belt-and-braces.
-7. **Health, sanity, vacuum.** Relation counts are compared against the
+7. Health, sanity, vacuum. Relation counts are compared against the
    pre-upgrade manifest and the upgrade aborts on any mismatch; then
    `vacuumdb --all --analyze` so the new cluster starts with fresh statistics.
 
@@ -129,7 +129,7 @@ data size -- this is not an online upgrade, and it is not `pg_upgrade --link`.
 The trade is that it is version-agnostic, it rebuilds every index (so it is
 immune to glibc collation changes), and it keeps a portable dump.
 
-It manages a **single local cluster**. It is not aware of replication or of
+It manages a single local cluster. It is not aware of replication or of
 Patroni-managed clusters, where the upgrade has to be coordinated across members
 and the leader; pointing it at one of those is not safe.
 
@@ -139,11 +139,11 @@ and the leader; pointing it at one of those is not safe.
 above applies either way, so neither mode can start postgres on a mismatched
 cluster.
 
-**`false` (default) -- automatic.** `postgresql.service` pulls the upgrade in and
+`false` (default) -- automatic. `postgresql.service` pulls the upgrade in and
 waits for it, so bumping the package migrates and comes back up on its own. This
 is what you want for an unattended `nixos-rebuild` or a fleet deploy.
 
-**`true` -- manual.** The upgrade never runs by itself. After a package bump
+`true` -- manual. The upgrade never runs by itself. After a package bump
 postgres refuses to start and says so in its journal:
 
 ```

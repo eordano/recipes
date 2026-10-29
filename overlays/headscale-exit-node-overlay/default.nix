@@ -1,10 +1,10 @@
 final: prev:
 let
-  version = "0.29.0-dev";
-  rev = "f905d58292866df651d0646b174cdfff4c4545c0";
+  version = "0.30.0-dev";
+  rev = "eeaac680bef26585c8cc1569f949e26d0d6aba80";
 in
 {
-  headscale = prev.buildGoModule {
+  headscale = prev.buildGo127Module {
     pname = "headscale";
     inherit version;
 
@@ -12,7 +12,7 @@ in
       owner = "juanfont";
       repo = "headscale";
       inherit rev;
-      hash = "sha256-yPSTyRaMfENYtgZjbj4KC43/niA8sEsYo5TkVnXGSSg=";
+      hash = "sha256-fLIXZKFgrGqc/rzG0WF3udNmiXH9zzvIW16h+6ry3+E=";
     };
 
     postPatch = ''
@@ -21,7 +21,7 @@ in
         --replace-fail 'Commit:    "unknown"' 'Commit: "${rev}"'
     '';
 
-    vendorHash = "sha256-Y9f0Q2Kw07eB8bURLT0jce+YoSs2WoowEX7t8tkNDvw=";
+    vendorHash = "sha256-IfMJsCNx1tuCu+jkrRaN9s7TzKePwOm0Dxt3jup2ysM=";
 
     subPackages = [ "cmd/headscale" ];
 

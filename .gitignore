@@ -1,7 +1,8 @@
-# generated docs site
+# generated docs site (tools/gen_site.py)
 /site/
 .cache/
 /site-src/
+/mkdocs.yml
 
 # literate-tangle build artifact (docs/tangle.sh output)
 /tangled/

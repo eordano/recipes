@@ -1,20 +1,20 @@
 # electron-bin-override
 
-Point an Electron app at nixpkgs' **prebuilt** `electron_<N>-bin` instead of the
+Point an Electron app at nixpkgs' prebuilt `electron_<N>-bin` instead of the
 from-source `electron_<N>`, so you skip a huge, often-uncached Electron compile.
 
 ## The problem
 
 nixpkgs packages Electron twice for each major version:
 
-| attribute            | what it is                                            |
-| -------------------- | ---------------------------------------------------- |
-| `electron_<N>`       | Electron built from source (Chromium + Node)         |
-| `electron_<N>-bin`   | The upstream prebuilt Electron tarball, repackaged   |
+| attribute | what it is |
+|---|---|
+| `electron_<N>` | Electron built from source (Chromium + Node) |
+| `electron_<N>-bin` | The upstream prebuilt Electron tarball, repackaged |
 
 Many Electron desktop apps default to the from-source `electron_<N>`. Building
 that locally is enormous (Chromium!) and slow -- and for a given point release it
-is frequently **not in the binary cache**, so you eat the full compile on your
+is frequently not in the binary cache, so you eat the full compile on your
 own machine. The `-bin` variant is a fixed-output download of the official
 prebuilt Electron: near-instant to realise and reliably cache-friendly.
 
@@ -71,15 +71,15 @@ nix eval nixpkgs#electron_39-bin.version
 
 ## Caveats / traps
 
-- **The `-bin` attribute must exist for that exact major version.** If the app
+- The `-bin` attribute must exist for that exact major version. If the app
   pins `electron_37` but only `electron_39-bin` is packaged, this won't help
   unless you also bump the app's Electron major -- which may break it.
-- **`.override` only works on named arguments.** It fails silently-ish if the
+- `.override` only works on named arguments. It fails silently-ish if the
   package hardcodes `electron` or wraps it differently. Check `__functionArgs`
   first (command above).
-- **Keep the override scoped to the one app.** A blanket top-level
+- Keep the override scoped to the one app. A blanket top-level
   `electron_39 = electron_39-bin` can ripple into other Electron consumers you
   didn't mean to switch.
-- **It's still a fetched binary.** The prebuilt Electron is a fixed-output
+- It's still a fetched binary. The prebuilt Electron is a fixed-output
   download; if it isn't cached, realising it needs network at fetch time (same
-  as any FOD), it just doesn't *compile*.
+  as any FOD), it just doesn't compile.

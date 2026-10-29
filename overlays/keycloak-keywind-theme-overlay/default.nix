@@ -4,12 +4,13 @@ let
       lib,
       fetchFromGitHub,
       buildNpmPackage,
-      nodejs,
+      nodejs_26,
       unzip,
       themeType ? "login",
       themeName ? "amora",
     }:
     buildNpmPackage {
+      nodejs = nodejs_26;
       pname = "keywind";
       version = "0.2.0";
 
@@ -22,7 +23,7 @@ let
 
       npmDepsHash = "sha256-w4xlQSyCpmv1bF8Igcr9t3q0UBwEynOkYTi+TfC13CA=";
 
-      buildInputs = [ nodejs ];
+      buildInputs = [ nodejs_26 ];
 
       buildPhase = ''
         runHook preBuild

@@ -17,11 +17,11 @@ everything), or wait for a fix (blocks your build now).
 
 ## The insight
 
-nixpkgs keeps **several Go minors packaged in parallel**, exposed as
+nixpkgs keeps several Go minors packaged in parallel, exposed as
 `buildGo125Module`, `buildGo126Module`, `buildGo127Module`, ... alongside the
 default `buildGoModule` (currently an alias for `buildGo126Module`). A Go
 package built with `buildGoModule` takes that
-builder as an *overridable argument*. So you can rebuild just the one broken
+builder as an overridable argument. So you can rebuild just the one broken
 package against an older, known-good minor and leave the rest of the tree on
 the new default.
 
@@ -67,12 +67,12 @@ nix eval nixpkgs#buildGo125Module --apply builtins.typeOf
 
 ## Caveats
 
-- **Not every package accepts `buildGoModule` under that name.** If
+- Not every package accepts `buildGoModule` under that name. If
   `.override { buildGoModule = ...; }` seems to do nothing, inspect
   `prev.<pkg>.override.__functionArgs` to find the real argument name the
   package's `callPackage` signature uses.
 
-- **Minor, not patch.** `buildGoNNNModule` pins a Go *minor*; the patch
+- Minor, not patch. `buildGoNNNModule` pins a Go minor; the patch
   version is whatever nixpkgs currently ships for it. If you need an exact
   Go point release, build a custom module builder and pass that instead:
 
@@ -91,6 +91,6 @@ nix eval nixpkgs#buildGo125Module --apply builtins.typeOf
   }
   ```
 
-- **This is a stopgap.** An older Go minor may miss security fixes present in
+- This is a stopgap. An older Go minor may miss security fixes present in
   the new default. Drop the pin as soon as the package builds on the current
   toolchain.

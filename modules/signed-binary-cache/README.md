@@ -1,6 +1,6 @@
 # signed-binary-cache
 
-Expose a NixOS store as a **signed** binary cache over HTTPS, so other
+Expose a NixOS store as a signed binary cache over HTTPS, so other
 machines can pull pre-built derivations from it instead of recompiling.
 
 It is a thin wrapper over `services.nix-serve` (pointed at `nix-serve-ng`, the
@@ -18,7 +18,7 @@ Two things make that safe and fast, and this module bakes in both.
 
 ## Key insight 1 -- sign every narinfo, or clients won't trust it
 
-Nix clients run with `require-sigs = true` by default. They will **refuse** a
+Nix clients run with `require-sigs = true` by default. They will refuse a
 substituter unless each narinfo carries a signature made by a key listed in
 their `trusted-public-keys`. If you skip signing, you either get nothing from
 the cache or have to disable signature checking fleet-wide (don't).
@@ -31,7 +31,7 @@ nix-store --generate-binary-cache-key cache.example.com-1 \
 ```
 
 Keep `cache-priv-key.pem` secret and hand it to the module via
-`secretKeyFile` (through agenix / sops-nix / a systemd credential -- **not** a
+`secretKeyFile` (through agenix / sops-nix / a systemd credential -- not a
 path inside the world-readable Nix store). Publish the one-line
 `cache-pub-key.pem` so clients can trust the cache.
 
@@ -41,7 +41,7 @@ trust by some other means (e.g. it is never exposed publicly).
 ## Key insight 2 -- store paths are immutable, so cache forever
 
 A Nix store path is a content hash: `/nix/store/<hash>-name`. A path that
-exists **never changes** -- a new build with different contents gets a
+exists never changes -- a new build with different contents gets a
 different hash and therefore a different path. There is no such thing as a
 stale narinfo or NAR for a path that already exists.
 
@@ -94,26 +94,26 @@ Then on every client that should use it:
 
 ## Caveats
 
-- **Producer, not proxy.** This module *serves* the local store. Caching an
+- Producer, not proxy. This module serves the local store. Caching an
   upstream like `cache.nixos.org` to save WAN bandwidth is a different job (a
   plain nginx `proxy_cache_path` in front of the upstream) -- don't conflate
   the two. A common layout is: this module on build hosts, an upstream-proxy
   cache on a central aggregating node.
-- **Signing key handling.** Anyone who can read the private key can forge
+- Signing key handling. Anyone who can read the private key can forge
   trusted narinfos for your fleet. Treat it as a real secret.
-- **You're publishing your store.** nix-serve exposes every path in the local
+- You're publishing your store. nix-serve exposes every path in the local
   store to anyone who can reach the domain. Put it behind auth / a private
   network if the store contains anything you don't want public. The signature
   proves authenticity, not confidentiality.
-- **ACME reachability.** With `enableACME = true`, port 80 for `domain` must
+- ACME reachability. With `enableACME = true`, port 80 for `domain` must
   be reachable for the HTTP-01 challenge (or switch to a DNS-01 setup / a
   wildcard via `useACMEHost`).
-- **The plaintext backend is bound to loopback, on purpose.** Upstream
+- The plaintext backend is bound to loopback, on purpose. Upstream
   `services.nix-serve.bindAddress` defaults to `0.0.0.0`, which binds the
   unencrypted HTTP socket on every interface; this module overrides that to
   `127.0.0.1` via its own `bindAddress` option. Don't rely on the firewall to
   cover for a wide bind: `networking.firewall.trustedInterfaces` (a VPN
-  interface, say) accepts *all* ports on that interface, so a `0.0.0.0` bind is
+  interface, say) accepts all ports on that interface, so a `0.0.0.0` bind is
   reachable there even with `openFirewall = false`. Set `bindAddress` yourself
   only if something other than the local nginx must talk to the backend
   directly -- and prefer giving it the TLS vhost instead.

@@ -20,10 +20,10 @@ session across all hosts, each a click away from a full terminal in the browser.
 
 The moving parts:
 
-- **A daemon** (a small Go server, supplied by you via the `package` option).
+- A daemon (a small Go server, supplied by you via the `package` option).
   It holds an in-memory registry of sessions and serves a dashboard plus a
   WebSocket-to-SSH bridge.
-- **A registration client** on each host (a shell loop, not shipped here) that
+- A registration client on each host (a shell loop, not shipped here) that
   `POST`s a session when it starts, heartbeats it, and `DELETE`s it when the
   tmux session ends.
 
@@ -31,7 +31,7 @@ The moving parts:
 
 This is the trap worth internalizing before you deploy anything like this.
 
-The bridge dials **a host named in caller-supplied JSON**. A host registers
+The bridge dials a host named in caller-supplied JSON. A host registers
 itself by posting `{ "host": "...", "tmux_socket": "...", ... }`; when an
 operator clicks that session, the server opens an SSH connection to whatever
 address the registration claimed and forwards the operator's terminal into it.
@@ -42,8 +42,8 @@ to a box the attacker controls** -- capturing keystrokes, or presenting a fake
 shell. So:
 
 - The daemon dials with its own key (`sshKeyPath`) and validates the remote
-  host key against a **pinned `known_hosts` file** (`knownHostsPath`).
-- There is **no trust-on-first-use**. An unknown host key is a hard failure.
+  host key against a pinned `known_hosts` file (`knownHostsPath`).
+- There is no trust-on-first-use. An unknown host key is a hard failure.
   That is exactly what you want for an unattended bridge that auto-routes to
   hosts named in untrusted input.
 
@@ -56,14 +56,14 @@ from it silently fails to open a terminal -- which is the safe failure mode.
 
 If you write or adapt the bridge, these bit us and will bite you:
 
-- **Constrain `HostKeyAlgorithms` from `known_hosts`.** Go's `crypto/ssh`
+- Constrain `HostKeyAlgorithms` from `known_hosts`. Go's `crypto/ssh`
   defaults to offering every algorithm it supports, lets the server pick, then
   reports a "key mismatch" if the server's choice does not match the pinned
   entry. OpenSSH derives the offered algorithms from the `known_hosts` entries
   for the host being dialed; mirror that. Without it, a host recorded under
-  ed25519 that *also* exposes an RSA key produces spurious mismatches.
+  ed25519 that also exposes an RSA key produces spurious mismatches.
 
-- **Prepend `COLORTERM=truecolor TERM=xterm-256color` to the remote command.**
+- Prepend `COLORTERM=truecolor TERM=xterm-256color` to the remote command.
   Some sshd configs (notably macOS defaults) do not pass these via `AcceptEnv`,
   and inner TUIs render dim or wrong colors without them. xterm.js renders
   true-color escapes natively.
@@ -98,16 +98,16 @@ GET    /api/sessions                     # read: dashboard data (no auth)
 
 Notes:
 
-- **`tmux_socket` is the full socket path, not a `-L` short name.** The server
+- `tmux_socket` is the full socket path, not a `-L` short name. The server
   runs `tmux -S "<tmux_socket>" attach-session ...`, which works regardless of how
   the session was created. Resolve the path before posting:
   `tmux -L <name> display -p '#{socket_path}'`.
-- **Auth is a write gate only.** `POST`/`PUT`/`DELETE` require
+- Auth is a write gate only. `POST`/`PUT`/`DELETE` require
   `Authorization: Bearer <token>` (the `tokenFile` value). Read endpoints -- the
   dashboard, the session page, the WebSocket -- are unauthenticated. The real
   front gate is your reverse proxy (TLS, and a caller-IP allowlist if you want
   one). The token just keeps strangers from spraying the registry.
-- **Lifecycle / GC.** The server expires an entry ~90s after its last heartbeat,
+- Lifecycle / GC. The server expires an entry ~90s after its last heartbeat,
   so the client must heartbeat at least once a minute. On a clean exit the
   client sends a `DELETE` so the entry disappears immediately instead of
   lingering for the full timeout.
@@ -149,12 +149,12 @@ daemon's SSH key and initialize an (initially empty) `known_hosts` at
 
 ## Caveats
 
-- **You must provide `package`.** The Go daemon source is not part of this
+- You must provide `package`. The Go daemon source is not part of this
   recipe; wire in your own `buildGoModule` derivation that produces
   `bin/claude-code-mux` honoring the flags in `default.nix`.
-- **Never expose `addr` directly.** Read endpoints are unauthenticated by
+- Never expose `addr` directly. Read endpoints are unauthenticated by
   design; the reverse proxy is your front door.
-- **The registration client is yours to write.** See the wire format above.
+- The registration client is yours to write. See the wire format above.
 - The daemon runs as an unprivileged system user with `ProtectSystem=strict`
   and a private `StateDirectory`; the SSH key and `known_hosts` live under
   `dataDir` (mode `0700`).

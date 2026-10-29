@@ -249,7 +249,7 @@ in
           rust-analyzer
           clang-tools
           typescript-language-server
-          nodejs
+          nodejs_26
           deno
         ])
         ++ cfg.extraPath;

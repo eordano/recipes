@@ -1,6 +1,6 @@
 # nixos-performance-tiers
 
-Workload-class **performance** defaults for NixOS: `builder`, `services`,
+Workload-class performance defaults for NixOS: `builder`, `services`,
 `workstation`, `hypervisor`. CPU frequency policy, zram/swap behaviour, ZFS
 scrub and trim policy, and the handful of mitigations that are genuinely
 expensive -- each one an explicit, auditable per-host decision rather than
@@ -9,7 +9,7 @@ something a workload label silently implies.
 This is the deliberate sibling of
 [`nixos-hardening-tiers`](nixos-hardening-tiers.md). That recipe owns the
 security trade-offs; this one owns the performance ones. They are separate
-modules because they are separate decisions, and because they *fight* -- most of
+modules because they are separate decisions, and because they fight -- most of
 this README is about who wins which fight and why.
 
 Everything is off until a host sets `tuning.enable = true`.
@@ -29,15 +29,15 @@ macos-builder  minimal  nix-builder-vm  perlless  qemu-guest
 
 None of them is about performance:
 
-- `nixos/modules/profiles/headless.nix` is *console* policy -- it disables
+- `nixos/modules/profiles/headless.nix` is console policy -- it disables
   gettys, sets `panic=1`, drops the GRUB splash. Nothing about CPU, memory or
   storage.
-- `nixos/modules/profiles/minimal.nix` is *closure size* -- it turns off
+- `nixos/modules/profiles/minimal.nix` is closure size -- it turns off
   documentation, `command-not-found`, logrotate, udisks2, xdg. Nothing about
   runtime behaviour.
-- `nixos/modules/profiles/hardened.nix` is now a **removal stub**: its whole
+- `nixos/modules/profiles/hardened.nix` is now a removal stub: its whole
   body is `lib.mkRemovedOptionModule [ "profiles" "hardened" ]` pointing at the
-  26.05 release notes. It went the *other* way and no longer exists.
+  26.05 release notes. It went the other way and no longer exists.
 
 So there is no upstream answer to "this box is a build machine / a hypervisor /
 a laptop, give me sane CPU, swap and ZFS defaults for that". Every host either
@@ -49,7 +49,7 @@ own `configuration.nix`. That is what this module replaces.
 A hardening profile is not a security-only object. It sets `vm.swappiness`, it
 disables SMT, it forces page-table isolation, it turns off the BPF JIT. If you
 add a performance module next to it and do not think hard about option
-priority, one of two things happens: the two modules **collide** and the host
+priority, one of two things happens: the two modules collide and the host
 stops evaluating, or one silently wins and you never find out which.
 
 The whole design of this recipe is: **lose every priority fight on purpose,
@@ -64,7 +64,7 @@ only when the corresponding option is non-`null`. That is intentional. If a
 host, a disko config, or a hardening tier already said something, this module
 must not argue.
 
-`vm.swappiness` is the single exception. It is a **plain assignment**
+`vm.swappiness` is the single exception. It is a plain assignment
 (priority 100):
 
 ```nix
@@ -72,26 +72,26 @@ boot.kernel.sysctl."vm.swappiness" = cfg.memory.swappiness;
 ```
 
 Why: the hardening recipe's `basic` tier pins `vm.swappiness = mkDefault 2`.
-Hosts that opted into *more* hardening therefore had their only swap device
+Hosts that opted into more hardening therefore had their only swap device
 made near-inert -- the memory policy and the mitigation were written by
 different people and never read together. A plain assignment beats `mkDefault`
 without reaching for `mkForce`, so the host still gets the last word by writing
 its own plain assignment or `mkForce`.
 
-`mkForce` *would* be required for a key the hardening recipe sets unqualified
+`mkForce` would be required for a key the hardening recipe sets unqualified
 (e.g. `vm.vfs_cache_pressure`). That fight is not picked here -- if you want it,
 you have to say `mkForce` yourself and know that you are overruling a security
 tier.
 
-### Trap 2 -- `mkOverride 900`, because `mkDefault` is a *conflict*
+### Trap 2 -- `mkOverride 900`, because `mkDefault` is a conflict
 
 A hardening `medium` tier sets `security.lockKernelModules = mkDefault true`.
 A workstation needs it off (v4l2loopback, VirtualBox, waydroid, DKMS, out-of-
 tree GPU drivers all `modprobe` after boot).
 
-Writing `mkDefault false` here does **not** mean "prefer false". Two
-`mkDefault`s with *different* values at the same priority are a merge
-**conflict**, and the host fails to evaluate with
+Writing `mkDefault false` here does not mean "prefer false". Two
+`mkDefault`s with different values at the same priority are a merge
+conflict, and the host fails to evaluate with
 `The option 'security.lockKernelModules' has conflicting definition values`.
 Writing `mkForce false` works but makes the value unoverridable -- a host that
 genuinely wants modules locked would then need `mkOverride 49` or lower, which
@@ -105,7 +105,7 @@ anybody uses, and still beatable by a plain host assignment (100) or `mkForce`
 security.lockKernelModules = lib.mkOverride 900 false;
 ```
 
-### Trap 3 -- the assertion reads the *merged* sysctl, not the tier flag
+### Trap 3 -- the assertion reads the merged sysctl, not the tier flag
 
 `sched_ext` schedulers are BPF `struct_ops` programs. With
 `net.core.bpf_jit_enable = 0` the `scx` unit starts, fails to attach, and burns
@@ -133,34 +133,34 @@ depending on who wrote it, and `x == false` would miss two of the three. The
 `or true` covers "nobody set it", which is the kernel default (JIT on).
 
 While you are in that file, note `merge = lib.mergeOneOption`: two definitions
-of the *same* sysctl key at the *same* priority are a hard error, not a
+of the same sysctl key at the same priority are a hard error, not a
 last-one-wins. That is why every sysctl below is either `mkDefault` or a
 deliberate single plain assignment.
 
-This is a cross-module read: it works regardless of *which* module turned the
+This is a cross-module read: it works regardless of which module turned the
 JIT off, or whether that module exists at all.
 
 ### Trap 4 -- zram sizing INVERTS on whether disk swap exists
 
 The instinct is "zram is a cache, keep it small". That is backwards when zram
-is the *only* swap device:
+is the only swap device:
 
 | | `swapDevices != []` | zram is the only swap |
 | --- | --- | --- |
-| `memory.zram.memoryPercent` | 25 | **50** |
-| `memory.swappiness` | 150 | **180** |
+| `memory.zram.memoryPercent` | 25 | 50 |
+| `memory.swappiness` | 150 | 180 |
 
-- **memoryPercent.** With a disk backstop, 25% is plenty -- anything zram
-  refuses spills to disk. With *no* backstop, shrinking zram does not save
+- memoryPercent. With a disk backstop, 25% is plenty -- anything zram
+  refuses spills to disk. With no backstop, shrinking zram does not save
   memory, it lowers the ceiling before the OOM killer runs. Cutting it to 25%
   raises OOM risk on exactly the hosts that already OOM under build load.
-- **swappiness.** 180 (`> 100`, legal since Linux 5.8's `MEMCG` swappiness
+- swappiness. 180 (`> 100`, legal since Linux 5.8's `MEMCG` swappiness
   rework) says "prefer swapping anonymous pages over evicting page cache",
-  which is correct when swapping means *compressing into RAM*. The moment any
+  which is correct when swapping means compressing into RAM. The moment any
   disk swap exists, that same preference sends writes to NAND, so it is capped
   at 150: still swap-forward, but no longer pretending the device is free.
 
-Detection is `config.swapDevices != [ ]`. `zramSwap` does **not** register
+Detection is `config.swapDevices != [ ]`. `zramSwap` does not register
 itself in `swapDevices`, so this check reads exactly "is there a backstop" and
 does not see itself.
 
@@ -176,13 +176,13 @@ and there is no workload where the default is better.
 
 `memory.arcMaxBytes` is `nullOr int`, default `null`, and that is not laziness.
 Uncapped ARC takes roughly 50% of physical memory and competes directly with
-databases, passthrough VM memory, inference runtimes and zram. But a *guessed*
+databases, passthrough VM memory, inference runtimes and zram. But a guessed
 cap is worse than none: set it too low on a fileserver and you destroy read
 performance, set it too high on a host with 100 GB of VM allocations and you
 OOM production. The number has to come from the host's actual installed RAM and
 actual workload, so the module refuses to invent one.
 
-Delivery is `boot.extraModprobeConfig`, **not** `boot.kernelParams`:
+Delivery is `boot.extraModprobeConfig`, not `boot.kernelParams`:
 
 ```nix
 boot.extraModprobeConfig = "options zfs zfs_arc_max=${toString cfg.memory.arcMaxBytes}\n";
@@ -193,14 +193,14 @@ is not a reliable delivery path. `extraModprobeConfig` is `types.lines`, so it
 concatenates cleanly with whatever else writes modprobe options (for instance
 the hardening recipe's `install <module> /bin/true` stub).
 
-### Trap 7 -- fstrim is *set* to false, never asserted on
+### Trap 7 -- fstrim is set to false, never asserted on
 
 On a ZFS root, `fstrim` is the wrong tool: ZFS exposes no `FITRIM` ioctl, so
 the timer is at best a no-op and at worst hides the fact that nobody enabled
 `services.zfs.trim`, which is the mechanism that actually discards.
 
 The tempting implementation is an assertion -- "you have ZFS, turn fstrim off".
-It fires on every ZFS host immediately, because upstream's default is **true**,
+It fires on every ZFS host immediately, because upstream's default is true,
 and unusually so. `nixos/modules/services/misc/fstrim.nix` writes:
 
 ```nix
@@ -217,12 +217,12 @@ is on for every host in the fleet, imported nixos-hardware SSD profile or not,
 and an assertion would break every ZFS host on the first deploy. (nixos-
 hardware's `common/pc/ssd` is a red herring: fstrim is on with or without it.)
 
-So this module *sets* it, at `mkDefault false`, so hosts that already opt out
+So this module sets it, at `mkDefault false`, so hosts that already opt out
 by hand -- plain `false` or `mkForce false` -- keep working unchanged and nothing
 collides.
 
 The same reasoning applies to `services.zfs.autoScrub.interval`: hosts whose
-disko config already states an interval as a plain assignment would **collide**
+disko config already states an interval as a plain assignment would collide
 with a plain assignment here, so it is `mkDefault`.
 
 ### Trap 8 -- one option emits no configuration at all, on purpose
@@ -230,7 +230,7 @@ with a plain assignment here, so it is `mkDefault`.
 `storage.noSnapshotPaths` produces nothing. Not a warning, not a systemd unit --
 nothing.
 
-ZFS dataset properties are **live state**, not declarative config. `disko`'s
+ZFS dataset properties are live state, not declarative config. `disko`'s
 `options` apply at pool-create time and disko never re-runs on an installed
 host, so there is no declarative path from "this dataset should not be
 snapshotted" to the running system. The real change is two imperative
@@ -258,7 +258,7 @@ PTI, the L1D flush, `io_uring` and `sched_ext` to a workload label repeats, one
 level up, exactly the mistake that made the hardening tiers confusing: the label
 has nothing to say about those knobs.
 
-So the five genuinely expensive trade-offs are **tri-state** under
+So the five genuinely expensive trade-offs are tri-state under
 `tuning.tradeoffs`:
 
 - `null` -- emit nothing, inherit whatever the hardening tier decided.
@@ -271,16 +271,16 @@ away silently.
 ### Trap 10 -- `slub_debug` is a debug facility, not hardening
 
 `cpu.slabDebug` adds `slub_debug=FZP`. It is frequently mistaken for a KSPP
-hardening recommendation. It is not: it disables slab merging *and* forces
+hardening recommendation. It is not: it disables slab merging and forces
 every affected cache off the SLUB fastpath with red-zoning and per-object
 consistency checks. Never leave it on permanently on a host that serves traffic
 or builds packages.
 
-`cpu.slabNoMerge` (`slab_nomerge`, default **on**) is the part you actually
+`cpu.slabNoMerge` (`slab_nomerge`, default on) is the part you actually
 want: it buys the cache-separation property without the debug slowpath.
 
-`page_poison=1` is deliberately **absent**. It has been a no-op since Linux
-5.11 *and* it takes precedence over `init_on_alloc`, silently suppressing
+`page_poison=1` is deliberately absent. It has been a no-op since Linux
+5.11 and it takes precedence over `init_on_alloc`, silently suppressing
 nixpkgs' own `INIT_ON_ALLOC_DEFAULT_ON`.
 
 ## Usage
@@ -332,7 +332,7 @@ tuning = {
 
 ### Wiring the hardening tier
 
-`tuning.hardeningTier.apply` defaults to **false** so this recipe never assumes
+`tuning.hardeningTier.apply` defaults to false so this recipe never assumes
 another module's option path exists. Two ways to use it:
 
 - Set `apply = true` if you also import `nixos-hardening-tiers`; this module
@@ -345,7 +345,7 @@ another module's option path exists. Two ways to use it:
   myNamespace.harden.medium = lib.mkDefault config.tuning.hardeningTier.medium;
   ```
 
-  Keep the `mkDefault`. If your own adapter forwards those with a *plain*
+  Keep the `mkDefault`. If your own adapter forwards those with a plain
   assignment, this module's `mkDefault` would be silently discarded.
 
 ## Options
@@ -372,7 +372,7 @@ another module's option path exists. Two ways to use it:
 | `tuning.storage.manageZfs` | `true` | Apply ZFS policy on hosts with a `zfs` filesystem. |
 | `tuning.storage.scrubInterval` | `"monthly"` | `services.zfs.autoScrub.interval`, `mkDefault`. |
 | `tuning.storage.disableFstrim` | `true` | `services.fstrim.enable = mkDefault false`. See Trap 7. |
-| `tuning.storage.noSnapshotPaths` | `[ "/nix" "/var/lib/docker" ]` | **Emits nothing.** See Trap 8. |
+| `tuning.storage.noSnapshotPaths` | `[ "/nix" "/var/lib/docker" ]` | Emits nothing. See Trap 8. |
 | `tuning.hardeningTier.basic` | `true` | Computed intent for the cheap hardening tier. |
 | `tuning.hardeningTier.medium` | `role != "workstation"` | Computed intent for the invasive tier. |
 | `tuning.hardeningTier.apply` | `false` | Forward the two above into `hardening.*`. |
@@ -380,21 +380,21 @@ another module's option path exists. Two ways to use it:
 
 ## Caveats
 
-- **ZFS detection is `fileSystems`-based.** `storage.*` only applies when some
+- ZFS detection is `fileSystems`-based. `storage.*` only applies when some
   entry in `config.fileSystems` has `fsType = "zfs"`. A host with ZFS pools that
   are not mounted through `fileSystems` (an imported data pool, say) will not
   trigger the policy -- set `services.zfs.*` directly there.
-- **`zramSwap.enable` is `mkDefault`.** If another module in your tree already
+- `zramSwap.enable` is `mkDefault`. If another module in your tree already
   enables zram unconditionally, this module states intent without colliding,
   but you should check nobody has hidden a `SuccessExitStatus = [ 1 ]` on
-  `systemd-zram-setup@` -- that turns a *failed* zram setup into a silent
+  `systemd-zram-setup@` -- that turns a failed zram setup into a silent
   success and is a common copy-paste.
-- **`memory.swappiness > 100` requires Linux >= 5.8.** On older kernels the
+- `memory.swappiness > 100` requires Linux >= 5.8. On older kernels the
   sysctl clamps at 100 and the zram-forward behaviour is not available.
-- **`tradeoffs.pti = false` is a real security decision**, not a tuning knob.
+- `tradeoffs.pti = false` is a real security decision, not a tuning knob.
   It is here because the alternative -- having it implied by `role = "builder"` --
   is worse, not because it is cheap.
-- **Changing `cpu.governor` on a laptop costs battery.** The `null` default is
+- Changing `cpu.governor` on a laptop costs battery. The `null` default is
   correct for attended machines: `schedutil` and `amd-pstate-EPP` already reach
   maximum clocks under sustained load, so pinning `performance` buys latency at
   idle, not throughput under load.

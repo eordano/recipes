@@ -4,8 +4,8 @@ Emit `BEACON`-prefixed marker lines to the journal (and thus the serial/EFI
 console) as a host finishes booting, answering the two questions that matter
 during an unattended reboot or a remote reinstall:
 
-- **What address do I SSH to?**
-- **Did this box rejoin the tailnet?**
+- What address do I SSH to?
+- Did this box rejoin the tailnet?
 
 A deploy script can `grep` them out of a noisy console log; a human can watch
 them scroll past on IPMI/serial during a blind reboot.
@@ -13,14 +13,14 @@ them scroll past on IPMI/serial during a blind reboot.
 ## The problem
 
 When you reboot or reinstall a headless machine you can't reach, you have no
-way to know it came back up, and no way to know *where* to reach it -- DHCP may
+way to know it came back up, and no way to know where to reach it -- DHCP may
 have handed it a new address, a new NIC may have become primary, or the tailnet
 join may have silently failed. The only channel you have is the serial console
 or an out-of-band framebuffer.
 
-This module is deliberately **local-only**: no daemon, no outbound call,
+This module is deliberately local-only: no daemon, no outbound call,
 nothing to configure on the receiving side. It just prints. That is the whole
-point -- it works when the console is the *only* channel left, which is exactly
+point -- it works when the console is the only channel left, which is exactly
 the recovery path for headless VPN gateways and exit nodes.
 
 ## Key insight / traps
@@ -32,19 +32,19 @@ the recovery path for headless VPN gateways and exit nodes.
   address nobody can SSH to. The module uses `prefsrc` first and only falls back
   to the first global IPv4, then to `ip=unknown`, so it never fails.
 
-- **The units must never wedge `multi-user.target`.** Both are
+- The units must never wedge `multi-user.target`. Both are
   `Type = oneshot` with `RemainAfterExit = true`, and the tailnet beacon exits
-  **successfully even on timeout**. An informational beacon that could block the
+  successfully even on timeout. An informational beacon that could block the
   boot would defeat its own purpose. The timeout (`tailscaleTimeoutSec`, default
   300s) bounds only the tailnet wait; the plain readiness line fires as soon as
   `network-online.target` is reached.
 
-- **`RemainAfterExit` means you read the marker after the fact.** The units show
+- `RemainAfterExit` means you read the marker after the fact. The units show
   `active (exited)` and won't re-emit until the next boot. Read them with
   `journalctl -u boot-beacon` / `-u tailscale-beacon`, or watch the console live
   during the reboot.
 
-- **The tailnet beacon honours a pinned tailscale.** It resolves the binary
+- The tailnet beacon honours a pinned tailscale. It resolves the binary
   through `config.services.tailscale.package`, so an overridden/pinned Tailscale
   is used rather than whatever is on `PATH`.
 

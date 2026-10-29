@@ -10,13 +10,13 @@ into the admin UI by hand.
 Keycloak has no first-class declarative-config surface for realms/clients/users
 that fits cleanly into a NixOS deployment. You bring the server up, then someone
 logs into the admin console and creates everything manually -- which is exactly
-the state you *don't* want tracked outside of your configuration. This module
+the state you don't want tracked outside of your configuration. This module
 closes that gap with a `keycloak-configure` oneshot that logs in as the admin,
 waits for the API to be ready, and creates each object idempotently.
 
 ## The two traps this solves
 
-### 1. The admin password must land in an EnvironmentFile *before* the service, and a `preStart` hook is too late
+### 1. The admin password must land in an EnvironmentFile before the service, and a `preStart` hook is too late
 
 Keycloak reads its initial admin credentials from `KEYCLOAK_ADMIN` /
 `KEYCLOAK_ADMIN_PASSWORD` environment variables. To keep the password out of the
@@ -25,7 +25,7 @@ Nix store and off the unit, we feed it via `EnvironmentFile=/run/keycloak/admin-
 The non-obvious part: **systemd resolves `EnvironmentFile` before it runs
 `ExecStartPre`**. So you cannot write that file from a `preStart` script on
 `keycloak.service` -- by the time the script runs, systemd has already tried (and
-failed) to read the file. The fix is a *separate* oneshot,
+failed) to read the file. The fix is a separate oneshot,
 `keycloak-admin-setup.service`, ordered `before = [ "keycloak.service" ]`, that
 reads `initialAdminPasswordFile` and writes a `0600 keycloak:keycloak` env file.
 `keycloak.service` `requires` + `after` it. The password never enters the store
@@ -88,7 +88,7 @@ Import the module and enable it:
 }
 ```
 
-All secrets are passed as **paths to files** (`*File` options) so nothing
+All secrets are passed as paths to files (`*File` options) so nothing
 sensitive is interpolated into the Nix store. Point them at whatever secret
 manager you use (agenix, sops-nix, `/run/secrets`, ...).
 
@@ -101,7 +101,7 @@ manager you use (agenix, sops-nix, `/run/secrets`, ...).
 | `bindAddress` | `127.0.0.1` | Interface to bind (`0.0.0.0` for all) |
 | `openFirewall` | `false` | Open `port` in the firewall (only with TLS in front) |
 | `adminUser` | `admin` | Bootstrap admin username |
-| `initialAdminPasswordFile` | *(required)* | File holding the initial admin password |
+| `initialAdminPasswordFile` | (required) | File holding the initial admin password |
 | `database.type` | `postgresql` | Enum of one (see Caveats) |
 | `database.createLocally` | `true` | Provision a local PostgreSQL DB + role |
 | `database.useSocket` | `true` | Unix-socket peer auth vs. TCP `scram-sha-256` |
@@ -110,7 +110,7 @@ manager you use (agenix, sops-nix, `/run/secrets`, ...).
 | `database.name` | `keycloak` | Database name |
 | `database.user` | `keycloak` | Database role |
 | `database.passwordFile` | `null` | DB password file (always required -- see Caveats) |
-| `realms.<name>.displayName` | *(required)* | Human-readable realm name |
+| `realms.<name>.displayName` | (required) | Human-readable realm name |
 | `realms.<name>.clients.<id>` | `{}` | OIDC clients (`redirectUris`, `secretFile`) |
 | `realms.<name>.users.<name>` | `{}` | Users (`email`, `firstName`, `lastName`, `passwordFile`) |
 | `configurationAttempts` | `60` | Readiness-poll attempts before giving up |
@@ -118,16 +118,16 @@ manager you use (agenix, sops-nix, `/run/secrets`, ...).
 
 ## Caveats
 
-- **`database.passwordFile` is always required**, even on the default
+- `database.passwordFile` is always required, even on the default
   socket/peer-auth path where Keycloak connects as its own OS user and never
   actually uses a network password. The upstream `services.keycloak` module
   insists on one; the assertion here exists purely "for NixOS keycloak module
   compatibility."
 
-- **Reconciliation is create-or-skip for clients and users.** Only realms are
+- Reconciliation is create-or-skip for clients and users. Only realms are
   updated in place, and only their `displayName` (via GET-modify-PUT so other
   realm settings are preserved). Changing a client's `redirectUris`/`secretFile`
-  or a user's password *after first creation* will **not** be picked up by a
+  or a user's password after first creation will not be picked up by a
   redeploy -- edit it in the admin UI, or delete the object to force recreation on
   the next run.
 
@@ -135,31 +135,31 @@ manager you use (agenix, sops-nix, `/run/secrets`, ...).
   `keycloak-configure` journal** (once, at creation time). Prefer `secretFile`
   for any client whose secret is referenced elsewhere.
 
-- **Provisioned users get permanent passwords** (`temporary: false`) and verified
+- Provisioned users get permanent passwords (`temporary: false`) and verified
   emails, so they log in immediately with no reset prompt. Adjust if you want a
   forced first-login reset.
 
-- **The `keycloak-configure` oneshot runs as `nobody:nogroup`** yet `cat`s
+- The `keycloak-configure` oneshot runs as `nobody:nogroup` yet `cat`s
   `initialAdminPasswordFile` (and every `passwordFile`/`secretFile`) directly. If
   your secret manager writes those files `0400 root:root` (the agenix/sops
   default), the unprivileged reconciler cannot read them and configuration fails.
-  Fix this by granting *group* read to a group the reconciler is in -- e.g. give
+  Fix this by granting group read to a group the reconciler is in -- e.g. give
   the secret files mode `0040` and a shared owning group, then run the reconciler
   under a dedicated user in that group (override the unit's `User`/`Group`). Do
-  **not** make the Keycloak admin password or client/user secrets world-readable:
+  not make the Keycloak admin password or client/user secrets world-readable:
   on a multi-user box any local account could then read them and take over every
   realm. World-readable is a last resort only, and never for the admin password.
 
-- **Plain HTTP -- front it with TLS.** The listener (admin console + admin-cli
+- Plain HTTP -- front it with TLS. The listener (admin console + admin-cli
   password-grant token endpoint) is cleartext HTTP. Keep `bindAddress =
   "127.0.0.1"` and put a TLS-terminating reverse proxy in front; the firewall
   port stays closed unless you set `openFirewall = true`. Binding to a
   non-loopback address and opening the port without a TLS proxy exposes admin
   credentials to LAN sniffing/brute-force -- a full-realm compromise vector.
 
-- **PostgreSQL only.** `database.type` is currently an enum of one.
+- PostgreSQL only. `database.type` is currently an enum of one.
 
-- **Legacy bootstrap env vars.** Admin bootstrap here uses `KEYCLOAK_ADMIN` /
+- Legacy bootstrap env vars. Admin bootstrap here uses `KEYCLOAK_ADMIN` /
   `KEYCLOAK_ADMIN_PASSWORD`. Keycloak 26.0 renamed those to
   `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` and kept the old
   names as deprecated aliases -- nixpkgs' own `services.keycloak` already sets the
@@ -167,7 +167,7 @@ manager you use (agenix, sops-nix, `/run/secrets`, ...).
   If your pinned Keycloak ever drops the deprecated aliases, change the
   `environment` key and the env-file key written by `keycloak-admin-setup`.
 
-- **Port below 1024 needs a loopback bind.** An assertion rejects `port < 1024`
+- Port below 1024 needs a loopback bind. An assertion rejects `port < 1024`
   unless `bindAddress = "127.0.0.1"` ("Ports below 1024 require root privileges.
   Use a higher port or bind to localhost only").
 
@@ -177,7 +177,7 @@ manager you use (agenix, sops-nix, `/run/secrets`, ...).
   `TimeoutStartSec`, after `keycloak.service` and `postgresql.service`.
 - It polls `/realms/master` until the API answers valid JSON, then obtains an
   admin token via the `admin-cli` client (password grant).
-- It calls `refresh_token` before *each* client and user to dodge token expiry on
+- It calls `refresh_token` before each client and user to dodge token expiry on
   large configs.
 - Client JSON is assembled with `lib.escapeShellArg` and the secret merged in via
   `jq --arg` (never string interpolation) to avoid shell-quoting hazards with

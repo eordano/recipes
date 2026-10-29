@@ -118,7 +118,6 @@ in
       };
 
       systemd = {
-        enable = true;
         users.root.shell = lib.mkIf cfg.promptOnLogin "${askPassShell}";
         storePaths = lib.mkIf cfg.promptOnLogin [ askPassShell ];
         network = {

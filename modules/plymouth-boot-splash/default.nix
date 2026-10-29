@@ -94,8 +94,6 @@ in
         };
 
         kernelParams = [ "quiet" ];
-
-        initrd.verbose = lib.mkDefault true;
       };
     })
   ];

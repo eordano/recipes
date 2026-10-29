@@ -8,39 +8,39 @@ downloads its own copy.
 
 ## The problem
 
-- **MaxMind gates the official downloads.** Fetching GeoLite2 from MaxMind
+- MaxMind gates the official downloads. Fetching GeoLite2 from MaxMind
   requires an account and a license key. That means a credential to store,
   scope, and rotate on every host that wants a geo database -- annoying for a
   fleet and overkill when several services on one host all want the same file.
-- **Consumers race the download.** A service that needs the database at
+- Consumers race the download. A service that needs the database at
   start-up will find an empty directory if it boots before anything has fetched
   it.
 
 ## The approach and its traps
 
-- **P3TERX mirror instead of MaxMind.** The default `mirrorBaseUrl` points at
+- P3TERX mirror instead of MaxMind. The default `mirrorBaseUrl` points at
   the `P3TERX/GeoLite.mmdb` GitHub mirror, which republishes the same GeoLite2
   files under the same license with no auth wall -- so there are **no
   credentials to store or rotate**. The trade-off: you trust a third party for
-  freshness and integrity, and there is **no checksum verification** of the
+  freshness and integrity, and there is no checksum verification of the
   downloaded files. If that trade-off is unacceptable, point `mirrorBaseUrl` at
   your own mirror or a MaxMind-authenticated endpoint.
 
-- **`RemainAfterExit` gates consumers.** The updater is a `oneshot` with
+- `RemainAfterExit` gates consumers. The updater is a `oneshot` with
   `RemainAfterExit = true`, so after a successful run the unit stays reported as
-  *active*. A consumer service that declares
+  active. A consumer service that declares
   `after = [ "geoip-updater.service" ]; wants = [ "geoip-updater.service" ];`
   therefore won't start until the databases have been fetched at least once.
   This is the whole point of the pattern -- ordering, not just a cron job.
 
-- **Activation-time initial download.** The systemd timer's `OnBootSec` fires a
-  few minutes after boot, but a consumer deployed *alongside* this module in the
+- Activation-time initial download. The systemd timer's `OnBootSec` fires a
+  few minutes after boot, but a consumer deployed alongside this module in the
   same activation would find an empty directory in the meantime. The
   `system.activationScripts` block does a one-time synchronous fetch when the
   first database file is missing, closing that gap. It ends with `|| true` so a
   failed download never aborts system activation.
 
-- **Jitter avoids a thundering herd.** `RandomizedDelaySec` (default `1h`)
+- Jitter avoids a thundering herd. `RandomizedDelaySec` (default `1h`)
   spreads the scheduled refresh across a fleet so many hosts don't all hit the
   mirror in the same minute.
 

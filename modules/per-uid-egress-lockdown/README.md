@@ -1,17 +1,17 @@
 # per-uid-egress-lockdown
 
 Run an untrusted program -- a code agent, a scraper, a vendored build script you
-did not read -- as **its own uid**, inside bubblewrap, with **no network at all
+did not read -- as its own uid, inside bubblewrap, with **no network at all
 except a loopback CONNECT proxy that enforces a domain allowlist**.
 
-The allowlist is enforced *twice*, and the second one is the only one that
+The allowlist is enforced twice, and the second one is the only one that
 counts.
 
 ## The problem
 
 "Give this thing internet access to exactly these domains" is normally
 implemented as a proxy plus `HTTPS_PROXY` in the environment. That is a
-**convention**, not a control. Anything the program runs -- a package manager's
+convention, not a control. Anything the program runs -- a package manager's
 post-install hook, a vendored binary, a Python module that builds its own
 `urllib3` pool -- can simply not read the variable, open its own socket, and go
 wherever it likes. Your allowlist becomes a suggestion the well-behaved parts of
@@ -20,9 +20,9 @@ the program follow.
 The fix is to make "not using the proxy" mean "no network", in the kernel:
 
 | Layer | What it enforces | How it is bypassed |
-| --- | --- | --- |
-| squid `http_access allow CONNECT <allowlist>` | *which* domains | ignore `HTTPS_PROXY` |
-| nftables `output` chain, `meta skuid <uid> drop` | *that the proxy is used at all* | you would need another uid |
+|---|---|---|
+| squid `http_access allow CONNECT <allowlist>` | which domains | ignore `HTTPS_PROXY` |
+| nftables `output` chain, `meta skuid <uid> drop` | that the proxy is used at all | you would need another uid |
 
 Layer 2 is what makes layer 1 real. With the drop rule in place, a program that
 ignores the proxy env vars gets `ENETUNREACH` on its very first `connect()` --
@@ -38,7 +38,7 @@ uid*, the proxy's own outbound packets match the drop rule and the proxy cannot
 reach anything. The obvious "fix" is to punch a hole -- allow `tcp dport 443` for
 the uid -- and now the sandboxed program has direct HTTPS to the entire internet.
 You have reintroduced exactly the bypass the table existed to close, and
-everything still *looks* like it works, because the proxy also still works.
+everything still looks like it works, because the proxy also still works.
 
 So: two uids, both pinned, and the module hard-asserts they differ:
 
@@ -63,37 +63,37 @@ meta skuid 60901 oifname "lo" accept
 meta skuid 60901 drop
 ```
 
-Note the sandbox uid has **no DNS**. It cannot resolve anything; resolution
+Note the sandbox uid has no DNS. It cannot resolve anything; resolution
 happens inside the proxy as part of `CONNECT host:443`. The failure signature
-when a program tries to resolve directly is a *name resolution* error
+when a program tries to resolve directly is a name resolution error
 (`EAI_AGAIN`, `getaddrinfo failed`, `ENOTFOUND`), never a connection error --
 which reads like a broken DNS setup and sends people off debugging
 `resolv.conf`. It is the lockdown working.
 
 ### Why `uid`, not a dynamic user
 
-`meta skuid` matches a **number**. `DynamicUser = true` or an unpinned
+`meta skuid` matches a number. `DynamicUser = true` or an unpinned
 `users.users.<n>.uid = null` allocates from a pool and can renumber across
 rebuilds or across hosts, at which point the table is filtering a uid nobody
 runs as -- fail-open, with no error anywhere. Both uids in this module are
 required to be explicit integers, and they are the module's real interface.
 
-`skuid` is the **kernel** uid that owns the socket. bubblewrap here uses
+`skuid` is the kernel uid that owns the socket. bubblewrap here uses
 `--unshare-all --share-net`, so the sandbox does get a user namespace, and a
-program can make itself uid 0 *inside* it. That changes nothing: the socket's
+program can make itself uid 0 inside it. That changes nothing: the socket's
 owner in the initial user namespace is still the sandbox uid, so the drop rule
 still matches. Namespace root does not buy egress.
 
 ## Trap 2 -- `deny CONNECT !SSL_ports` and `cache deny all`
 
-A domain allowlist on a CONNECT proxy without a **port** allowlist is an
+A domain allowlist on a CONNECT proxy without a port allowlist is an
 arbitrary-port tunnel to every allowlisted host. `CONNECT allowed.example:22`
 is an SSH session; `:25` is a mail relay; `:9000` is whatever that host also
 runs. And a proxy without `cache deny all` quietly accumulates a copy of
 everything the sandbox fetched, on disk, owned by the proxy user.
 
 Both directives are in the generated config, and the ordering matters -- the
-deny comes **before** the allow:
+deny comes before the allow:
 
 ```
 acl <name>_allowed dstdomain .example.com
@@ -123,17 +123,17 @@ server certificate itself.
 
 ## Trap 3 -- the source tree is read-only and lives outside the writable state
 
-The sandboxed program's own code (`sourceDir`) is bind-mounted **read-only**,
-and it is kept **outside** `stateDir`, the one place the sandbox can write.
+The sandboxed program's own code (`sourceDir`) is bind-mounted read-only,
+and it is kept outside `stateDir`, the one place the sandbox can write.
 
 If the program can write its own source tree -- because the checkout sits inside
 the state directory, or because it was bind-mounted read-write "so it can update
-itself" -- then one compromised run rewrites what the *next* run executes. The
+itself" -- then one compromised run rewrites what the next run executes. The
 sandbox has bought you a delay, not a boundary: the attacker gets the same
 credentials, the same allowlist, and now also code execution that survives you
 noticing.
 
-Writable outputs are punched *into* the read-only tree as individual mounts:
+Writable outputs are punched into the read-only tree as individual mounts:
 
 ```nix
 sourceDir = "/var/lib/agent-src/checkout";     # read-only
@@ -146,7 +146,7 @@ launcher.stateMounts = {
 
 The module asserts `sourceDir` is not under `stateDir`.
 
-Note bubblewrap's requirement here: `--bind` of a *file* needs the target to
+Note bubblewrap's requirement here: `--bind` of a file needs the target to
 already exist on both sides. That is what `stateFiles` is for -- the launcher
 touches each one into existence before the run, or bwrap fails with a bare
 `Can't find source path`.
@@ -155,13 +155,13 @@ touches each one into existence before the run, or bwrap fails with a bare
 
 The tempting way to wire a secret into a module like this is a `builtins.pathExists`
 guard on the encrypted file, or an assertion that the decrypted path exists.
-Both put a *secret's* lifecycle on the critical path of the *host's evaluation*:
+Both put a secret's lifecycle on the critical path of the host's evaluation:
 forget to `git add` the new `.age` file, or rotate a key, and every deploy of
 that machine fails at eval -- including the deploys that have nothing to do with
 this sandbox.
 
 This module never reads secrets at eval time. `launcher.secretEnvironment` and
-`launcher.secretFiles` take *paths*, and the generated wrapper checks them at
+`launcher.secretFiles` take paths, and the generated wrapper checks them at
 run time:
 
 ```bash
@@ -175,7 +175,7 @@ Prefer `secretFiles` (bind-mounted read-only into the sandbox) over
 `secretEnvironment` when the program can take a path: `secretEnvironment` reads
 the file with `$(cat ...)`, so the value transits the launcher's own argv.
 
-## Trap 5 -- a bare sudoers command permits *any* arguments
+## Trap 5 -- a bare sudoers command permits any arguments
 
 The launcher is meant to be invoked as the sandbox user, typically:
 
@@ -184,7 +184,7 @@ sudo -u agent agent
 ```
 
 A sudoers entry of the form `alice ALL=(agent) NOPASSWD: /nix/store/.../bin/agent`
-permits that command **with any arguments whatsoever**. If your launcher
+permits that command with any arguments whatsoever. If your launcher
 forwards `"$@"` anywhere -- into the sandboxed command, into a `--setenv`, into
 the tool's own CLI -- that is an injection surface handed to whoever is on the
 `sudo.users` list.
@@ -196,12 +196,12 @@ which is sudoers for "this command, with no arguments at all":
 alice ALL=(agent) NOPASSWD: /nix/store/.../bin/agent ""
 ```
 
-Set it to `false` only if the launcher genuinely takes arguments *and* you have
+Set it to `false` only if the launcher genuinely takes arguments and you have
 audited what it does with them.
 
 ## Trap 6 -- sharing the host network namespace is not free
 
-This sandbox deliberately does **not** use `--unshare-net`: it needs to reach
+This sandbox deliberately does not use `--unshare-net`: it needs to reach
 the proxy on the host's loopback. (For total isolation with no allowlist at all,
 see [`network-isolated-editor`](network-isolated-editor.md), which does use
 `--unshare-net`.) Sharing the host netns has two consequences:
@@ -211,7 +211,7 @@ see [`network-isolated-editor`](network-isolated-editor.md), which does use
   proxy, a metrics endpoint -- is one `connect()` away. The `meta skuid <uid>
   drop` rule is what stops it, and every entry you add to `extraLoopbackPorts`
   is a hole punched straight through to a host service. Keep it empty.
-- **Abstract-namespace AF_UNIX sockets are NOT filtered.** They live in the
+- Abstract-namespace AF_UNIX sockets are NOT filtered. They live in the
   network namespace, but nftables cannot match them. A session bus, an
   `@/tmp/.X11-unix/X0`, an agent socket bound to the abstract namespace is
   reachable by the sandbox regardless of every rule in this module. If the host
@@ -223,7 +223,7 @@ see [`network-isolated-editor`](network-isolated-editor.md), which does use
 The chain is `policy accept` with explicit per-uid drops, deliberately: this
 table narrows exactly two uids and never touches anyone else's traffic, so it
 composes with whatever firewall the host already runs. The price is that
-**if the table is not there, nothing is filtered**.
+if the table is not there, nothing is filtered.
 
 `networking.nftables.flushRuleset` runs `flush ruleset` on every start *or
 reload* of `nftables.service` -- including reloads triggered by entirely
@@ -263,23 +263,23 @@ squid <= 6 and want it.
 
 ## What upstream nixpkgs does not do
 
-- **There is no per-uid egress option in NixOS.** `networking.firewall` has no
+- There is no per-uid egress option in NixOS. `networking.firewall` has no
   owner/uid match of any kind. The only uid-owner rules in the entire NixOS
   module set are in `nixos/modules/services/networking/sslh.nix:246` (and its
   IPv6 twin at 265) -- and those go through `networking.firewall.iptablesCommands`,
   which the nftables backend hard-rejects
   (`nixos/modules/services/networking/firewall-nftables.nix:65-70` asserts
   `extraCommands == ""` / `extraStopCommands == ""`). `biboumi.nix:225` contains
-  a *comment* sketching `add rule inet filter output meta skuid biboumi tcp
+  a comment sketching `add rule inet filter output meta skuid biboumi tcp
   accept` as something the reader might write themselves. That is the whole of
   upstream's per-uid egress story.
 
-- **`services.squid` cannot be used for this.** Three independent blockers, all
+- `services.squid` cannot be used for this. Three independent blockers, all
   in `nixos/modules/services/networking/squid.nix`:
-  1. It is a **singleton** -- one `services.squid.enable`, one unit, hard-coded
+  1. It is a singleton -- one `services.squid.enable`, one unit, hard-coded
      `/run/squid.pid` and `/var/log/squid`. You cannot run a per-sandbox
      instance, let alone two.
-  2. Its unit has **no `User=`** (lines 186-206). Squid starts as **root** and
+  2. Its unit has no `User=` (lines 186-206). Squid starts as root and
      drops the worker to the `squid` account internally via
      `cache_effective_user squid squid` (line 85). The uid that owns the master
      process is 0, and "uid 0" is not something a per-uid drop rule can be
@@ -297,11 +297,11 @@ squid <= 6 and want it.
   `pid_filename` has to point inside the runtime directory, because
   `ProtectSystem = "strict"` makes squid's default `/run/squid.pid` unwritable.
 
-- **Nothing upstream wires bubblewrap into a NixOS service.** `bubblewrap`
+- Nothing upstream wires bubblewrap into a NixOS service. `bubblewrap`
   appears in exactly one NixOS module (`programs/opengamepadui.nix`), as a
   runtime dependency of a game launcher.
 
-- **`shutdown_lifetime` defaults to 30 seconds** and squid honours it on
+- `shutdown_lifetime` defaults to 30 seconds and squid honours it on
   SIGTERM. Left alone, every `systemctl restart` of the proxy -- i.e. every
   deploy -- stalls for half a minute. This module defaults it to `1 seconds`.
 
@@ -346,7 +346,7 @@ squid <= 6 and want it.
 }
 ```
 
-The sandbox starts from `--clearenv`, so **nothing** is inherited. TLS-using
+The sandbox starts from `--clearenv`, so nothing is inherited. TLS-using
 programs generally need `SSL_CERT_FILE` set explicitly (Node additionally wants
 `NODE_EXTRA_CA_CERTS`); the launcher always binds `/etc/ssl` read-only so the
 bundle is there to point at.
@@ -373,17 +373,17 @@ does not exist is skipped rather than failing the unit.
 ## Options
 
 | Option | Default | Meaning |
-| --- | --- | --- |
+|---|---|---|
 | `enable` | `false` | Turn everything on. |
 | `name` | `"sandbox"` | Prefix for units (`<name>-squid`, `<name>-egress-lockdown`), the nft table `inet <name>-egress`, the squid ACL, `/run/<name>-squid`, and the wrapper binary. |
-| `user` / `uid` | `name` / `60900` | The sandboxed program's account. **`uid` must be pinned.** |
+| `user` / `uid` | `name` / `60900` | The sandboxed program's account. `uid` must be pinned. |
 | `proxyUser` / `proxyUid` | `"<name>-proxy"` / `60901` | The proxy's account. Must differ from the above. |
 | `allowedDomains` | `[ ]` | squid `dstdomain` allowlist. Leading dot = domain + subdomains. |
 | `extraLoopbackPorts` | `[ ]` | Extra host-loopback TCP ports the sandbox uid may reach. Each one is a hole; see Trap 6. |
 | `proxy.package` | `pkgs.squid` | Stock nixpkgs squid is sufficient -- no SSL-bump features are used. |
 | `proxy.listenAddress` / `.port` | `"127.0.0.1"` / `3128` | Where the proxy listens. Loopback only. |
 | `proxy.sslPorts` | `[ 443 ]` | Ports CONNECT may target. |
-| `proxy.egressPorts` | `[ 443 ]` | Ports the *proxy uid* may reach off-box (nftables). |
+| `proxy.egressPorts` | `[ 443 ]` | Ports the proxy uid may reach off-box (nftables). |
 | `proxy.allowDns` | `true` | Let the proxy uid do DNS. The sandbox uid never can. |
 | `proxy.accessLog` | `stdio:/run/<name>-squid/access.log squid` | tmpfs by default: no persistent request log. `stdio:/dev/stdout squid` sends it to the journal instead. |
 | `proxy.cacheLog` | `/run/<name>-squid/cache.log` | Must be inside the runtime directory. |
@@ -411,27 +411,27 @@ does not exist is skipped rather than failing the unit.
 
 ### `launcher.package` -- bringing your own
 
-The generated launcher covers the common shape, but the *inner* command of a
+The generated launcher covers the common shape, but the inner command of a
 real workload often needs setup the option surface does not express. Setting
 `launcher.package` to your own derivation (providing `bin/<binName>`) keeps
 everything else -- the two accounts, the nftables table, the proxy, the staging
 mounts, the sudo rule -- and replaces only the wrapper.
 
 The kernel lockdown does not care which wrapper you use: it is bound to the
-uid, not to this module's script. What you take on is reproducing the *sandbox*
+uid, not to this module's script. What you take on is reproducing the sandbox
 properties yourself -- read-only source, `--clearenv` plus the proxy variables,
 no argument passthrough.
 
 ## Firewall backend
 
-This module does **not** use `networking.firewall.extraCommands` /
-`extraStopCommands`, so it works on **both** the iptables and the nftables
+This module does not use `networking.firewall.extraCommands` /
+`extraStopCommands`, so it works on both the iptables and the nftables
 backend without an assertion. It owns a self-contained `inet <name>-egress`
 table applied by its own oneshot unit (`nft -f <ruleset>`, one atomic netlink
 transaction), and it stays out of `networking.nftables.tables` -- which deletes
 and recreates every table it declares on each reload. See
 [`egress-filter`](egress-filter.md) for the same finding in a
-per-*interface* (rather than per-*uid*) filter, and for what to do when the
+per-interface (rather than per-uid) filter, and for what to do when the
 allowlist has to be expressed as IPs instead of a CONNECT target.
 
 Ordering: `<name>-egress-lockdown.service` is `after = [ "firewall.service" ]`
@@ -451,7 +451,7 @@ nix-build test.nix --arg pkgs 'import <nixpkgs> { system = "x86_64-linux"; }'
 or, from a flake, `pkgs.callPackage ./modules/per-uid-egress-lockdown/test.nix {}`.
 
 It boots a confined host, a router, an allowlisted origin and a
-non-allowlisted origin. The two origins sit on a **different subnet** from the
+non-allowlisted origin. The two origins sit on a different subnet from the
 confined host, so every packet toward them has to transit the router -- on one
 subnet the client would ARP the origin directly, the router would never see the
 traffic, and the filtering assertions would be tautologies.
@@ -459,23 +459,23 @@ traffic, and the filtering assertions would be tautologies.
 What it asserts, and why none of it can be satisfied by accident:
 
 | # | claim | how it is instrumented |
-|---|-------|------------------------|
+|---|---|---|
 | 0 | `uid == proxyUid` is rejected | eval-time; the module's own assertion must fire |
-| 1 | confined uid **reaches** an allowlisted destination via the proxy | body matches, squid logged the CONNECT, the router forwarded packets, and the **proxy** uid -- not the confined one -- was the sender |
-| 2 | confined uid **cannot** reach a non-allowlisted destination via the proxy | squid logs `TCP_DENIED`, and the router forwarded **zero** packets toward it |
-| 3 | confined uid **cannot bypass** the proxy | direct `curl --noproxy '*'` to the destination IP hangs and times out |
-| 4 | a different uid is unaffected | `root` and an ordinary uid run the *identical* command against the *identical* address and succeed, including to the non-allowlisted origin |
+| 1 | confined uid reaches an allowlisted destination via the proxy | body matches, squid logged the CONNECT, the router forwarded packets, and the proxy uid -- not the confined one -- was the sender |
+| 2 | confined uid cannot reach a non-allowlisted destination via the proxy | squid logs `TCP_DENIED`, and the router forwarded zero packets toward it |
+| 3 | confined uid cannot bypass the proxy | direct `curl --noproxy '*'` to the destination IP hangs and times out |
+| 4 | a different uid is unaffected | `root` and an ordinary uid run the identical command against the identical address and succeed, including to the non-allowlisted origin |
 | 5 | the shipped bubblewrap launcher does 1-3 in one real run | reads what the sandboxed program wrote to its state dir |
 | 6 | confined uid cannot resolve names either | DNS is the proxy uid's privilege |
 
 Subtest 3 is the one worth copying. `curl` failing is satisfied by a typo in an
 address, a missing route, or a dead server, so the failure alone proves nothing.
-It is pinned down by **two counters on opposite sides of the boundary**: an
-`output`-hook counter on the confined host at priority `-300` (i.e. *before* the
+It is pinned down by two counters on opposite sides of the boundary: an
+`output`-hook counter on the confined host at priority `-300` (i.e. before the
 module's chain at priority `0`), matching `meta skuid <confined uid>`, and the
 topology library's `forward`-hook counter on the router. The subtest requires
-the first to be **non-zero** -- the process really did emit a SYN at the
-destination -- and the second to be **zero** -- nothing left the host. A drop that
+the first to be non-zero -- the process really did emit a SYN at the
+destination -- and the second to be zero -- nothing left the host. A drop that
 is not in the packet path fails one or the other.
 
 That is not theoretical. Mutating the module's chain from
@@ -483,43 +483,43 @@ That is not theoretical. Mutating the module's chain from
 reads `meta skuid <uid> drop` in `nft list table` -- keeps subtests 1, 2 and the
 "table is loaded" check green and fails subtest 3 with
 `the confined uid reached the origin directly: 'ALLOWED-ORIGIN-PAYLOAD'`.
-Removing the module's `uid != proxyUid` assertion fails the test at *eval*;
-nixpkgs alone only emits a `Duplicate uid` **trace** for that configuration, so
+Removing the module's `uid != proxyUid` assertion fails the test at eval;
+nixpkgs alone only emits a `Duplicate uid` trace for that configuration, so
 the module's assertion is the only thing that stops it.
 
 On the "the proxy must run as a different uid" corollary: that is caught at eval
 (subtest 0), before a VM boots. If the assertion did not exist, the runtime test
 would still fail -- with a shared uid the sandbox's `drop` rule matches squid's
-own egress and subtest 1 fails -- but it would fail as *"the proxy is broken"*,
-not as *"the lockdown is void"*. The eval check is what names the actual fault.
+own egress and subtest 1 fails -- but it would fail as "the proxy is broken",
+not as "the lockdown is void". The eval check is what names the actual fault.
 
 ## Related recipes
 
 - [`network-isolated-editor`](network-isolated-editor.md) -- the all-or-nothing
   sibling: bubblewrap with `--unshare-net` and no proxy at all. Use it when the
   answer is "no network", not "these domains".
-- [`egress-filter`](egress-filter.md) -- domain allowlist for a whole *interface*
+- [`egress-filter`](egress-filter.md) -- domain allowlist for a whole interface
   (VM bridge, container network), enforced as a live IP set.
 - [`nixos-hardening-tiers`](nixos-hardening-tiers.md) -- host-level tiers; note
   its knobs and this module's `systemd` hardening are independent decisions.
 
 ## Caveats
 
-- **`dstdomain` is only as tight as the domain.** `.example.com` matches every
+- `dstdomain` is only as tight as the domain. `.example.com` matches every
   subdomain. If an allowlisted host runs an open redirect, a proxy endpoint, or
   user-controlled subdomains, egress is effectively wider than the list reads.
-- **The proxy sees hostnames, not content.** CONNECT tunnels are opaque; there
+- The proxy sees hostnames, not content. CONNECT tunnels are opaque; there
   is no inspection of what flows through an allowed tunnel, by design (see the
-  no-SSL-bump note above). This bounds *where* data can go, not *what* goes
+  no-SSL-bump note above). This bounds where data can go, not what goes
   there.
-- **No egress accounting or rate limiting.** Add `delay_pools` via
+- No egress accounting or rate limiting. Add `delay_pools` via
   `proxy.extraConfig` if you need it.
-- **The access log is on tmpfs by default** -- it does not survive a reboot.
+- The access log is on tmpfs by default -- it does not survive a reboot.
   That is deliberate (no long-term record of what the sandbox fetched) but it
   also means no forensic trail; set `proxy.accessLog = "stdio:/dev/stdout
   squid"` to route it to the journal.
-- **Nothing here confines the *filesystem* beyond the bind mounts you declare.**
+- Nothing here confines the filesystem beyond the bind mounts you declare.
   `/nix/store` is bound read-only in full, as it must be for anything to run.
-- **The `stateDir` is shared across runs.** Two concurrent invocations of the
+- The `stateDir` is shared across runs. Two concurrent invocations of the
   launcher write to the same directory; the module does not lock. Wrap it in a
   systemd unit or a flock if that matters.

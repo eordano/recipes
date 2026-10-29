@@ -1,12 +1,12 @@
 # dns-connectivity-probe
 
-A hardened, long-running systemd probe for diagnosing **intermittent** DNS and
+A hardened, long-running systemd probe for diagnosing intermittent DNS and
 reachability flaps -- the kind that are gone by the time you SSH in to look.
 
 ## The problem
 
 "DNS was broken for a bit around 3am" is unfalsifiable without evidence.
-Interactive tools (`dig`, `ping` at the prompt) only tell you about *now*, and a
+Interactive tools (`dig`, `ping` at the prompt) only tell you about now, and a
 flap that lasts seconds every few hours never lines up with when you're watching.
 
 This module runs a passive black-box probe: every few seconds it `dig`s and
@@ -27,14 +27,14 @@ local-resolver failure from an upstream/WAN one.
 ### 1. logrotate must use `copytruncate`
 
 This is the load-bearing detail. The probe is a `while true` loop that holds the
-log open with `>>` and **never reopens it** (it doesn't handle SIGHUP). A normal
+log open with `>>` and never reopens it (it doesn't handle SIGHUP). A normal
 rename-and-reopen rotation would move the file aside and expect the writer to
 reopen the path -- but this writer keeps writing to the same file descriptor,
 which now points at the unlinked old inode. The "current" log silently stops
 growing while your disk fills with an invisible deleted-but-open file.
 
 `copytruncate` sidesteps this: logrotate copies the file's contents out to the
-rotated name and then truncates the original **in place**, preserving the inode
+rotated name and then truncates the original in place, preserving the inode
 the probe is still holding. You lose the theoretical few lines written between
 copy and truncate -- an acceptable trade for a probe whose whole point is to keep
 writing to one stable fd.
@@ -83,12 +83,12 @@ Import `default.nix` and enable it:
 
 ## Caveats
 
-- **It writes forever.** At the default 5s interval with a few targets this is a
+- It writes forever. At the default 5s interval with a few targets this is a
   few log lines per second -- small, but real. Rotation is hourly keeping 6 files;
   tune `keepRotations` for your retention.
-- **`ping` needs ICMP to work.** Some networks/hosts drop ICMP even when
+- `ping` needs ICMP to work. Some networks/hosts drop ICMP even when
   everything is fine, which shows up as `PING-FAILED` noise. Trust the `DNS-*`
   lines for resolution; treat ping as a coarse reachability hint.
-- **The probe never reopens its log** by design (that's why `copytruncate`
+- The probe never reopens its log by design (that's why `copytruncate`
   exists). Don't "fix" it to handle SIGHUP and switch to a rename rotation unless
   you also make the script reopen the path.

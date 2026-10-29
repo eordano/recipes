@@ -116,6 +116,8 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
         ExecStart = "${geoipUpdater}/bin/geoip-updater";
+        Restart = "on-failure";
+        RestartSec = "30s";
         User = cfg.user;
         Group = cfg.group;
         StandardOutput = "journal";

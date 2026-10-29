@@ -15,7 +15,7 @@ the switch fails, because the running system already has its root mounted and
 its pools imported -- the activation touches the bootloader and the systemd
 mount units, not the live root.
 
-The damage only lands at the **next boot**, when the initrd and stage-1 mounts
+The damage only lands at the next boot, when the initrd and stage-1 mounts
 try to find storage the new generation describes and it is not there. By then
 you are looking at an emergency shell on a machine that was working an hour ago,
 with no error anywhere in the switch that produced it. Two shapes of this bite
@@ -39,7 +39,7 @@ zfs mounts. It emits one `system.preSwitchChecks.diskLayout` script that:
 - checks every declared `/dev/...` block device and LUKS backing device exists
   (`[ -e ]`);
 - checks every declared pool is imported (`zpool list <pool>`);
-- if pools are declared but **zero** LUKS devices are, inspects the running
+- if pools are declared but zero LUKS devices are, inspects the running
   pool's vdevs (`zpool list -vHP`) for dm-crypt backing
   (`/dev/mapper/*`, `dm-uuid-CRYPT-*`, `dm-name-*`) and refuses if it finds any.
 
@@ -73,7 +73,7 @@ This is the whole reason the guard exists. `switch-to-configuration` installs
 the bootloader early in activation, well before it restarts mount units. A bad
 layout therefore produces a clean switch and a bricked next boot -- the failure
 is separated from its cause by a reboot. A `preSwitchChecks` guard is the only
-place to catch it *before* the bootloader is touched. An activation-script check
+place to catch it before the bootloader is touched. An activation-script check
 would run too late; a boot-time check would run on the already-broken generation.
 
 ### `preSwitchChecks` scripts run with essentially no PATH
@@ -91,7 +91,7 @@ The dm-crypt backstop asks `zpool list -vHP <pool>` what the running pool sits
 on. If that query fails -- `zpool` missing, the pool wedged, a non-zero exit --
 it produces no output, and a naive `zpool ... | while read` masks the failure
 behind the pipe's exit status: no vdevs matched, so the check "passes" and the
-warning it exists to raise never fires. That is failing **open** on exactly the
+warning it exists to raise never fires. That is failing open on exactly the
 regression this module is meant to catch. The guard instead runs the query with
 its exit status captured (redirect to a temp file, then iterate the file), and
 on any non-zero exit for a declared pool it emits a loud `INCONCLUSIVE` warning
@@ -111,7 +111,7 @@ check against.
 
 ### It checks existence, not correctness
 
-The guard proves the declared storage is *present*, not that it is the right
+The guard proves the declared storage is present, not that it is the right
 storage. A pool of the right name backed by the wrong disks, or a `by-partlabel`
 path that resolves to an unrelated partition, passes. It closes the "declares
 storage that isn't here" gap, which is the one that reliably bricks boots; it is

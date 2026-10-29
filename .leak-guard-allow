@@ -1,0 +1,10 @@
+# Reviewed, intentionally public guard hits. One ERE per line, matched against
+# `path:line:text` (path relative to the export root).
+
+# Disposable keypairs generated for NixOS VM tests only; they authorize nothing
+# outside the test VMs (see modules/zfs-impermanence-rollback/test-keys/README.md).
+^modules/(remote-luks-unlock|zfs-impermanence-rollback)/test-keys/[a-z_-]+:1:-----BEGIN OPENSSH PRIVATE[ ]KEY-----$
+^modules/ssh-write-only-drop-box/test\.nix:[0-9]+: +-----BEGIN OPENSSH PRIVATE[ ]KEY-----$
+
+# Prose naming the age private-key prefix the recipe refuses to emit; no key material.
+^packages/agenix-generated-recipients/README\.md:[0-9]+:.*`AGE-SECRET-KEY[-]1\.\.\.` \*\*private\*\* key

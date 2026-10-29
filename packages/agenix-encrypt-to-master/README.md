@@ -1,12 +1,12 @@
 # agenix-encrypt-to-master
 
-Import an **existing** plaintext secret into an [agenix-rekey](https://github.com/oddlama/agenix-rekey)
+Import an existing plaintext secret into an [agenix-rekey](https://github.com/oddlama/agenix-rekey)
 tree by encrypting it to your fleet's master recipients -- the counterpart to the
 generators that synthesise a secret from scratch.
 
 ## The problem
 
-agenix-rekey encrypts every secret to a small set of *master* identities (the
+agenix-rekey encrypts every secret to a small set of master identities (the
 keys the operator holds), then rekeys each secret onto the per-host age keys at
 build time. To add a secret you already have in plaintext (an API token, a
 downloaded credential, a key you didn't generate yourself), you need to encrypt
@@ -20,7 +20,7 @@ evaluate, that path is dead.
 
 ## The insight
 
-Don't evaluate. **Scrape.**
+Don't evaluate. Scrape.
 
 agenix-rekey setups typically render a generated rules file that already
 contains the resolved master recipients as plain string literals:
@@ -49,7 +49,7 @@ independently of, any host evaluating.
 
 ## The rules-file contract
 
-The scrape assumes the block is laid out **one quoted recipient per line**:
+The scrape assumes the block is laid out one quoted recipient per line:
 
 ```nix
 masterPubkeys = [
@@ -87,8 +87,8 @@ your normal rekey step afterwards to fan the secret out onto the host keys.
 
 ### Options
 
-| Option               | Default             | Purpose |
-| -------------------- | ------------------- | ------- |
+| Option | Default | Purpose |
+|---|---|---|
 | `rulesPath`          | `"secrets/rules.nix"` | Repo-relative path to the rules file with the `masterPubkeys` block. |
 | `secretsDir`         | `"secrets"`         | Repo-relative directory where `<name>.age` is written. |
 | `extraRuntimeInputs` | `[ ]`               | Extra tools on `PATH`. See "YubiKey master keys" below. |
@@ -103,7 +103,7 @@ your normal rekey step afterwards to fan the secret out onto the host keys.
 
 ### YubiKey (or other plugin) master keys
 
-Encrypting *to* a plugin-format recipient such as `age1yubikey1...` needs the
+Encrypting to a plugin-format recipient such as `age1yubikey1...` needs the
 matching age plugin binary on `PATH` even though no touch is required to
 encrypt. If any master recipient is plugin-format, pass it in:
 
@@ -117,15 +117,15 @@ Plain `age1...` recipients need nothing extra, which is why the default is empty
 
 ## Caveats
 
-- **Flat names only.** The secret name must have no slashes and no leading dot;
+- Flat names only. The secret name must have no slashes and no leading dot;
   the tool rejects anything else so you can't accidentally escape the secrets
   directory.
-- **A new name isn't wired up yet.** If the name isn't already present in the
+- A new name isn't wired up yet. If the name isn't already present in the
   rules file, the tool warns: the secret exists and is encrypted correctly, but
   your rekey step won't fan it onto hosts until the rules are regenerated to
   include it.
-- **The rules file must already exist.** This tool only encrypts; it doesn't
+- The rules file must already exist. This tool only encrypts; it doesn't
   generate the rules. Generate/refresh them first (or point `RULES_FILE` at an
   existing one).
-- **`.age` files are re-encryptable, not append-only.** Running again with the
+- `.age` files are re-encryptable, not append-only. Running again with the
   same name overwrites the existing ciphertext.

@@ -58,12 +58,12 @@ No options -- it patches `pkgs.fish` in place.
 
 ## Alternatives / caveats
 
-- **Prefer disabling the generator if you can.** fish ships real, curated
+- Prefer disabling the generator if you can. fish ships real, curated
   completions for common tools anyway, so setting
   `programs.fish.generateCompletions = false;` loses little and avoids the whole
   issue. Use this overlay when you specifically want home-manager to keep
   generating manpage-derived completions.
-- **This is a stopgap.** Once your home-manager input carries the upstream fix
+- This is a stopgap. Once your home-manager input carries the upstream fix
   (extracting the generator via `status get-file` itself), remove the overlay --
   the guard means keeping it around is harmless but unnecessary.
 - Only affects `pkgs.fish`. If some other package pins its own fish, override

@@ -1,10 +1,10 @@
 final: prev:
 let
   goToolchain = prev.go.overrideAttrs (_: rec {
-    version = "1.26.2";
+    version = "1.26.8";
     src = prev.fetchurl {
       url = "https://go.dev/dl/go${version}.src.tar.gz";
-      hash = "sha256-LpHrtpR6lulDb7KzkmqIAu/mOm03Xf/sT4Kqnb1v1Ds=";
+      hash = "sha256-Tjm5jkL5RvoFrIvFtxh335fb23y7Gnd7VBZnrXEX/S4=";
     };
   });
 

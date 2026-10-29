@@ -1,5 +1,4 @@
 """Patch mlx_vlm/server.py to separate <think>...</think> into reasoning_content."""
-import re, sys
 
 path = "mlx_vlm/server.py"
 src = open(path).read()

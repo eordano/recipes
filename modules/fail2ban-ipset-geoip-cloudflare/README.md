@@ -1,7 +1,7 @@
 # fail2ban-ipset-geoip-cloudflare
 
-A NixOS module that backs fail2ban with **kernel ipsets** instead of the stock
-one-iptables-rule-per-ban action, seeds a **whitelist** from GeoIP country
+A NixOS module that backs fail2ban with kernel ipsets instead of the stock
+one-iptables-rule-per-ban action, seeds a whitelist from GeoIP country
 ranges and your CDN/reverse-proxy edge ranges, and can optionally **mirror bans
 to the Cloudflare edge** via the API.
 
@@ -15,8 +15,8 @@ your active bans.
 
 If you also sit behind a CDN or reverse proxy, two more things bite:
 
-- The connection the firewall sees comes from the **edge**, not the client. Ban
-  the source IP naively and you can ban the CDN itself, blackholing *every*
+- The connection the firewall sees comes from the edge, not the client. Ban
+  the source IP naively and you can ban the CDN itself, blackholing every
   visitor.
 - Legitimate traffic from a trusted region or your own proxy can trip a jail and
   get banned, with no clean override.
@@ -35,25 +35,25 @@ iptables -I INPUT 1 -m set --match-set f2b-banned src \
 
 Why each piece matters:
 
-- **O(1), unbounded bans.** One rule matches a set membership regardless of how
+- O(1), unbounded bans. One rule matches a set membership regardless of how
   many IPs are banned. No rule-per-IP explosion.
-- **Bans survive reloads.** The rule is (re)created from
+- Bans survive reloads. The rule is (re)created from
   `networking.firewall.extraCommands`, and the bans themselves live in the
   kernel ipset with timeouts -- they outlive firewall restarts, jail reloads, and
   rebuilds. `extraStopCommands` removes only the rule, never the set.
-- **Whitelist is an override, not a race.** The single match is "banned **AND
+- Whitelist is an override, not a race. The single match is "banned **AND
   NOT** whitelisted". A trusted source is dropped from the ban path within the
   same rule evaluation, so there is no window where a ban rule fires before a
   separate allow rule. RFC1918, loopback, GeoIP countries, edge ranges, and your
   own hosts can never be banned even if a jail matches them.
-- **CDN-aware.** Whitelist your edge ranges so the edge is never banned. The
+- CDN-aware. Whitelist your edge ranges so the edge is never banned. The
   optional Cloudflare action mirrors the ban to the edge firewall, where the
   real client actually connects -- that is the only place a masked client IP can
   be blocked.
 
 ## The trap (keep it)
 
-ipset stores the entry timeout as a **signed 32-bit int**. The `actionban`
+ipset stores the entry timeout as a signed 32-bit int. The `actionban`
 caps `<bantime>` at `2147483` seconds (~24.8 days):
 
 ```
@@ -98,7 +98,7 @@ out per-country aggregated prefix lists at:
 <pkg>/share/geoip-country-lists/<cc>/ipv6-aggregated.txt
 ```
 
-one CIDR per line, `#` comments allowed. There is **no such package in nixpkgs**
+one CIDR per line, `#` comments allowed. There is no such package in nixpkgs
 -- supply your own overlay/derivation built from a public aggregated list such as
 [herrbischoff/country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks)
 or the ipverse lists. When left `null`, country whitelisting is skipped.
@@ -123,7 +123,7 @@ services.fail2banIpset.cloudflare = {
 };
 ```
 
-The token needs the *firewall access-rules edit* scope. The action POSTs a
+The token needs the firewall access-rules edit scope. The action POSTs a
 block rule to `user/firewall/access_rules/rules` on ban and deletes it on unban,
 treating a `duplicate_of_existing` as success. Provide `apiKeyFile` via your
 secret manager (agenix/sops/etc.) -- never inline the token.
@@ -144,7 +144,7 @@ world-readable store. Pass a runtime path string.
 | `enable` | `false` | Turn the module on. |
 | `whitelistCountries` | `[]` | Lowercase country codes whose CIDRs join the whitelist set. Requires `geoipCountrylistPackage` (an assertion fires otherwise). |
 | `geoipCountrylistPackage` | `null` | Package providing the per-country prefix lists; `null` skips country whitelisting. |
-| `whitelistIPv4` | `[]` | Extra IPv4 addresses/CIDRs for the whitelist set *and* fail2ban's `ignoreIP`. |
+| `whitelistIPv4` | `[]` | Extra IPv4 addresses/CIDRs for the whitelist set and fail2ban's `ignoreIP`. |
 | `whitelistIPv6` | `[]` | Same for IPv6 (`ignoreIP` entry only when `networking.enableIPv6`). |
 | `edgeRangesFile` | `null` | File of CDN/reverse-proxy edge ranges, one IP/CIDR per line. |
 | `banTime` | `"96h"` | Default jail bantime. Both bundled jails override it with `168h`; the ipset entry timeout is separately capped at ~24.8 days. |
@@ -152,7 +152,7 @@ world-readable store. Pass a runtime path string.
 | `nginx.logPath` | `/var/log/nginx/access.log` | Access log that jail reads. |
 | `kernelJail.enable` | `true` | The `kernel-sus-connections` journal jail. |
 | `cloudflare.enable` | `false` | Mirror `nginx-protect` bans to the Cloudflare edge. |
-| `cloudflare.apiKeyFile` | *(required when enabled)* | Runtime path **string** to a file holding the Bearer token. |
+| `cloudflare.apiKeyFile` | (required when enabled) | Runtime path string to a file holding the Bearer token. |
 | `cloudflare.email` | `noreply@example.com` | Exported as `FAIL2BAN_CFUSER`; the token is what actually authenticates. |
 
 ## Jails included
@@ -182,12 +182,12 @@ This module works on both `networking.firewall.backend = "iptables"` (the
 default, as described above) and `"nftables"`. nixpkgs' nftables firewall
 hard-asserts `networking.firewall.extraCommands`/`extraStopCommands == ""`,
 so the nftables path can't use them for the ban/whitelist sets or the
-enforcing rule. Instead it keeps its **own** nftables table (family `inet`,
+enforcing rule. Instead it keeps its own nftables table (family `inet`,
 name `fail2ban-ipset`) with equivalent `f2b-banned`/`f2b-whitelist` (and, with
 IPv6, `f2b-banned6`/`f2b-whitelist6`) sets and a single early-priority
 (`filter - 10`, ahead of the normal firewall) `reject` rule.
 
-That table is deliberately **not** managed through
+That table is deliberately not managed through
 `networking.nftables.tables`: NixOS deletes and fully recreates every table
 declared that way on every `nftables.service` reload -- which happens on any
 `nixos-rebuild switch` that touches the ruleset -- and doing that here would

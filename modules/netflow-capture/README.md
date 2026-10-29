@@ -22,14 +22,14 @@ and you get a fully-formed, restart-on-failure capture service.
 Two things about `nfpcapd` are easy to get wrong, and the module bakes in the
 right answer:
 
-1. **It runs as `User=root`, on purpose, even though it's handed `-u/-g`.**
+1. It runs as `User=root`, on purpose, even though it's handed `-u/-g`.
    Opening a raw AF_PACKET capture socket needs root. `nfpcapd` opens the socket
    first, then drops privilege to the configured user itself. If you "fix" the
    unit to run directly as the unprivileged user, the socket open fails with
    `EPERM`. The system user only ever owns the on-disk output -- never the running
    process at startup.
 
-2. **`nfpcapd` will not create missing output directories.** If the `-w` path
+2. `nfpcapd` will not create missing output directories. If the `-w` path
    (or the raw-pcap `-p` path) doesn't exist, the daemon exits immediately. The
    module therefore emits `systemd.tmpfiles` rules to pre-create the base storage
    dir, each listener's per-interface subdirectory, and any pcap sidecar dir,

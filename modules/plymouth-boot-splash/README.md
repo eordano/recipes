@@ -1,11 +1,11 @@
 # plymouth-boot-splash
 
-A small NixOS module with two **independent, opt-in** flags for a desktop
+A small NixOS module with two independent, opt-in flags for a desktop
 machine:
 
-- `modules.bootConfig.enable` -- use **systemd-boot** on EFI with sensible
+- `modules.bootConfig.enable` -- use systemd-boot on EFI with sensible
   desktop defaults.
-- `modules.plymouth.enable` -- a graphical **Plymouth** boot splash that hides
+- `modules.plymouth.enable` -- a graphical Plymouth boot splash that hides
   boot log spam behind `quiet`.
 
 They are deliberately separate: you can want a clean bootloader without a
@@ -27,7 +27,7 @@ layout entirely.
 
 That is sometimes convenient on a desktop you physically own and control -- but
 it is a full local-root escalation for anyone who can touch the keyboard. So
-the editor is a **separate option defaulting to `false`**. Enable it only on a
+the editor is a separate option defaulting to `false`. Enable it only on a
 physically trusted desktop:
 
 ```nix
@@ -41,12 +41,12 @@ person could reach.
 ### Trap 2 -- `quiet` + a splash makes early boot go dark
 
 A splash works by hiding kernel and systemd output behind `quiet`. The problem:
-early boot is exactly when things break in ways you *need* to see -- a missing
+early boot is exactly when things break in ways you need to see -- a missing
 initrd module, a failed LUKS unlock, a root device that never appears. Under a
 naive `quiet` splash those failures present as a **frozen logo with no
 message**.
 
-The fix is to keep the **initrd** stage verbose while only silencing the later,
+The fix is to keep the initrd stage verbose while only silencing the later,
 less interesting log noise:
 
 ```nix
@@ -76,7 +76,7 @@ Import the module and flip the flags you want:
 | Option | Default | Notes |
 | --- | --- | --- |
 | `modules.bootConfig.enable` | `false` | Enable systemd-boot EFI defaults. |
-| `modules.bootConfig.editor` | `false` | Boot-time cmdline editor. **Local-root bypass -- trusted desktops only.** |
+| `modules.bootConfig.editor` | `false` | Boot-time cmdline editor. Local-root bypass -- trusted desktops only. |
 | `modules.bootConfig.canTouchEfiVariables` | `true` | Allow writing EFI NVRAM variables. |
 | `modules.plymouth.enable` | `false` | Enable the Plymouth splash. |
 | `modules.plymouth.theme` | `"square_hud"` | Theme name; must be provided by `themePackages`. |
@@ -84,11 +84,11 @@ Import the module and flip the flags you want:
 
 ## Caveats
 
-- **Theme closure size.** The default `themePackages` pulls a large third-party
+- Theme closure size. The default `themePackages` pulls a large third-party
   theme pack; the `selected_themes` override keeps only a handful. Trim it
   further, or replace it with any package that installs your chosen theme.
-- **A splash is not encryption UX.** If you use LUKS, Plymouth renders the
+- A splash is not encryption UX. If you use LUKS, Plymouth renders the
   passphrase prompt, but the splash itself provides no security -- it only
   changes what you see. The security-relevant knob here is the editor flag.
-- **EFI-only.** `modules.bootConfig` assumes systemd-boot, i.e. a UEFI system.
+- EFI-only. `modules.bootConfig` assumes systemd-boot, i.e. a UEFI system.
   On BIOS/GRUB machines, use only the `modules.plymouth` half.

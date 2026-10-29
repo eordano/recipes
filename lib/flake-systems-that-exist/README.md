@@ -3,7 +3,7 @@
 A `forAllSystems` helper that derives the system list from what the **pinned
 nixpkgs actually supports** instead of hardcoding it. A hardcoded entry the
 pinned nixpkgs has since dropped is not a missing output -- it is an evaluation
-**error** -- and the check you are almost certainly running cannot see it.
+error -- and the check you are almost certainly running cannot see it.
 
 Verified against nixpkgs 26.11 (`nixos-unstable`, rev `f13ff45`, 2026-08) using
 Nix 2.34.8. The `nix flake check` behaviour below is a property of the Nix CLI,
@@ -78,13 +78,13 @@ Three deliberate parts to that invocation:
   This is the flag that turns the warning into a failure.
 - `--no-build` keeps it evaluation-only, which is sufficient: the bug is an
   evaluation error, so it surfaces the moment the attribute is forced. It is a
-  speed knob, not a correctness one. Adding `--all-systems` does *not* make Nix
+  speed knob, not a correctness one. Adding `--all-systems` does not make Nix
   attempt foreign-system builds -- with `checks.aarch64-linux.*` present on an
   `x86_64-linux` host, `nix flake check --all-systems` still reports
   `running 0 flake checks...` and exits 0. What `--no-build` drops is building
-  the host's *own* `checks`, which detection does not need.
+  the host's own `checks`, which detection does not need.
 - `path:<dir>` rather than `.`, because on a git checkout `.` copies only
-  **tracked** files. A systems list that has been edited into a new file but not
+  tracked files. A systems list that has been edited into a new file but not
   yet `git add`ed makes the check fail on something else entirely, and the real
   answer never gets reached:
 
@@ -174,7 +174,7 @@ forAllSystems   f -> lib.genAttrs systems f     (f takes the system string)
   "all system doubles for platforms where nixpkgs can do native compilation
   reasonably well". Membership means nixpkgs intends to work there; an
   individual package may still be marked unsupported or fail to build.
-- This narrows the list to systems that *evaluate*. `--all-systems` is still the
+- This narrows the list to systems that evaluate. `--all-systems` is still the
   thing that proves it, and it is worth wiring into CI regardless -- a system can
   be perfectly supported and still have one of your outputs broken on it.
 - `config.allowDeprecatedx86_64Darwin = "force"` suppresses that specific

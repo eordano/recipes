@@ -145,6 +145,19 @@ in
       description = "Advertise this node as a Tailscale exit node.";
     };
 
+    trustTailnet = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Put tailscale0 in `networking.firewall.trustedInterfaces`, so every
+        listener on the host is reachable from any tailnet peer the Headscale
+        ACL admits. With `false` the firewall judges tailnet packets like any
+        other: only `allowedTCPPorts`/`allowedUDPPorts` and
+        `networking.firewall.interfaces.tailscale0.*` get through. sshd stays
+        reachable either way when its port is in `allowedTCPPorts`.
+      '';
+    };
+
     ssh = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -312,7 +325,7 @@ in
       networking.firewall = lib.mkMerge [
         (lib.mkIf cfg.enable {
           allowedUDPPorts = [ config.services.tailscale.port ];
-          trustedInterfaces = [ "tailscale0" ];
+          trustedInterfaces = lib.optional cfg.trustTailnet "tailscale0";
         })
         (lib.mkIf (cfg.enable && cfg.exitNode) {
           allowedUDPPorts = [ 3478 ];

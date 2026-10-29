@@ -1,6 +1,6 @@
 # bbolt-cli-package
 
-Package **one** CLI out of a larger Go repository with `buildGoModule`, instead
+Package one CLI out of a larger Go repository with `buildGoModule`, instead
 of building every command the upstream module ships.
 
 ## Problem
@@ -11,7 +11,7 @@ countless Go services, and it happens to include a handy `bbolt` CLI for
 inspecting and surgically editing those `.db` files on disk.
 
 If you point `buildGoModule` at such a repo with no further hints, it will try
-to build **all** main packages it finds -- pulling in commands you do not want,
+to build all main packages it finds -- pulling in commands you do not want,
 extra build time, and sometimes extra dependencies. You wanted one tool.
 
 ## Key insight / trap
@@ -23,11 +23,11 @@ subPackages = [ "cmd/bbolt" ];   # build only this one command
 ldflags     = [ "-s" "-w" ];     # strip symbol table + DWARF debug info
 ```
 
-- **`subPackages`** is the important one. It restricts the build to the given
+- `subPackages` is the important one. It restricts the build to the given
   import paths (relative to the module root, i.e. the directory with `go.mod`).
   With it, `buildGoModule` compiles and installs exactly `cmd/bbolt` and nothing
   else. Without it, every `package main` in the tree becomes an output binary.
-- **`ldflags = [ "-s" "-w" ]`** is the standard Go binary-slimming pair: `-s`
+- `ldflags = [ "-s" "-w" ]` is the standard Go binary-slimming pair: `-s`
   drops the symbol table, `-w` drops DWARF debug info. Useful for an ops tool
   you just want to drop on a box.
 - Set `mainProgram` in `meta` so `lib.getExe` / `nix run` resolve to `bbolt`

@@ -3,12 +3,12 @@
 A NixOS module for self-hosting [Forgejo](https://forgejo.org/) behind an nginx
 TLS front-end. It supports two deployment shapes behind one option set:
 
-- **Container** (`asContainer = true`, default): a podman container built from a
+- Container (`asContainer = true`, default): a podman container built from a
   locally-assembled OCI image, running as a non-root uid inside, optionally on a
   sandboxed runtime such as gVisor/`runsc`. (The podman unit itself is an
   ordinary root-run system service -- `virtualisation.oci-containers` has no
   rootless mode.)
-- **Native** (`asContainer = false`): NixOS's built-in `services.forgejo`,
+- Native (`asContainer = false`): NixOS's built-in `services.forgejo`,
   typically over a unix socket.
 
 Both share the same nginx vhost, database wiring, and optional OIDC login-source
@@ -25,12 +25,12 @@ a reverse proxy. The traps are the point.
 
 ### 1. `RUN_USER` must match the in-container passwd name, or startup dies
 
-Since 15.x, Forgejo's "current run user matches config" check is **fatal**. In a
+Since 15.x, Forgejo's "current run user matches config" check is fatal. In a
 container the process runs as a numeric uid that has no name unless you give it
 one. The module ships a synthetic `/etc/passwd` (`containerEtc`) that names the
 container uid `root`, and hardcodes `RUN_USER = root` to match. Change one
 without the other and Forgejo refuses to boot. If you re-point the container to
-a different uid, the passwd entry regenerates automatically -- but the *name*
+a different uid, the passwd entry regenerates automatically -- but the name
 stays `root` on purpose.
 
 ### 2. Externally-added SSH keys abort boot unless you allow them
@@ -47,7 +47,7 @@ authenticate, only the startup consistency assertion is disabled.
 ### 3. `proxy_buffering off` is load-bearing for remote git clones
 
 With nginx's default `proxy_buffering on`, nginx buffers the entire git
-`upload-pack` response and **truncates the tail** when flushing to a client with
+`upload-pack` response and truncates the tail when flushing to a client with
 non-zero latency. The clone or fetch dies with:
 
 ```
@@ -55,7 +55,7 @@ fatal: early EOF
 fatal: unexpected disconnect while reading sideband packet
 ```
 
-The insidious part: **loopback clients are unaffected**, so it works perfectly
+The insidious part: loopback clients are unaffected, so it works perfectly
 on the box and only fails for real remote clients over the network. The module
 sets `proxy_buffering off` and `proxy_request_buffering off` on the git vhost.
 Do not "clean this up."
@@ -153,7 +153,7 @@ modules.forgejo.oidc = {
 Note: the `is_sync_enabled` flip is issued via `psql` against a Postgres
 backend; it is a no-op / harmless failure on other engines.
 
-**Secret handling.** The OIDC client secret is read from `clientSecretFile` at
+Secret handling. The OIDC client secret is read from `clientSecretFile` at
 runtime and is never written to the systemd journal -- the setup unit does not
 echo it and does not dump the `login_source.cfg` column (which stores the
 secret) to stdout. It is, however, passed to `forgejo admin auth add-oauth`
@@ -199,7 +199,7 @@ with `hidepid=2`.
   `database.sslMode` (e.g. `"require"`) so the DB password and repo metadata are
   not sent in cleartext. This applies to the container shape; the native shape
   inherits the upstream `services.forgejo` default.
-- **The module appends to the host's `sshd_config` unconditionally.** Enabling it
+- The module appends to the host's `sshd_config` unconditionally. Enabling it
   adds a `Match User forgejo` block setting `PubkeyAuthOptions none`, so
   `authorized_keys` forced-commands behave predictably when git-over-ssh is
   routed through the host's openssh. That happens in both shapes, whether or not

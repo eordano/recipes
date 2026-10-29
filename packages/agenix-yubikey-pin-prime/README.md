@@ -1,32 +1,32 @@
 # agenix-yubikey-pin-prime
 
 Wrap an `agenix` subcommand (`generate`, `rekey`, ...) so it runs unattended
-even when your master identity lives on a **YubiKey** and requires a PIV PIN.
+even when your master identity lives on a YubiKey and requires a PIV PIN.
 
 ## The problem
 
 When your agenix master identity is a YubiKey (via `age-plugin-yubikey`),
 decrypting a secret requires the card's PIV PIN. Agenix runs its work inside a
 non-interactive `decrypt | encrypt` pipeline. Inside that pipeline `rage`
-**cannot prompt** for the PIN: it prints
+cannot prompt for the PIN: it prints
 
 ```
 A PIN is required...
 ```
 
-and the retry prompt then **spins forever on EOF** -- the pipeline never had a
+and the retry prompt then spins forever on EOF -- the pipeline never had a
 usable TTY to type the PIN into. So `agenix rekey`/`agenix generate` hangs the
 moment it needs to touch the card.
 
 ## The insight / trap
 
-The YubiKey caches an entered PIN **per card session**. So you don't need the
-PIN available inside the pipeline -- you only need it entered *once* on the card
+The YubiKey caches an entered PIN per card session. So you don't need the
+PIN available inside the pipeline -- you only need it entered once on the card
 beforehand. The fix is a one-shot preamble:
 
-> Before handing control to agenix, do a single **direct, interactive** decrypt
+> Before handing control to agenix, do a single direct, interactive decrypt
 > of any existing `.age` file using the same YubiKey identity. That decrypt
-> *is* allowed to prompt (it has a real TTY), you type the PIN (and touch if
+> is allowed to prompt (it has a real TTY), you type the PIN (and touch if
 > your slot needs it), the card caches it, and the whole agenix pipeline then
 > runs through unattended.
 
@@ -66,15 +66,15 @@ Call it once per subcommand you want wrapped:
 }
 ```
 
-`masterIdentity` must be an **identity**, not a recipient. For
+`masterIdentity` must be an identity, not a recipient. For
 `age-plugin-yubikey` that is the file holding the `AGE-PLUGIN-YUBIKEY-...`
 stanza which names the card slot (what `age-plugin-yubikey --identity` writes).
 It is safe to commit -- the private key never leaves the card. A plain `age1...`
-recipient file (conventionally `*.pub`) will **not** work: the priming step is
+recipient file (conventionally `*.pub`) will not work: the priming step is
 `rage -d -i <file>`, and `-i` needs an identity, so a recipient makes every
 prime fail with a decrypt error and leaves agenix hanging exactly as before.
 
-Note the *binary* name is not the attribute name: it defaults to
+Note the binary name is not the attribute name: it defaults to
 `agenix-<subcommand>-pinprimed`, so those two calls install
 `agenix-generate-pinprimed` and `agenix-rekey-pinprimed`. Pass `name` if you
 want something else. Run it interactively -- it primes the PIN, then behaves
@@ -85,25 +85,25 @@ exactly like the wrapped `agenix` command.
 | option | default | meaning |
 | --- | --- | --- |
 | `agenixSubcommand` | `"generate"` | Subcommand (+ flags) to exec after priming. String or list, e.g. `[ "rekey" "-a" ]`. |
-| `masterIdentity` | `"keys/age-yubikey-identity.txt"` | YubiKey **identity** file passed to `rage -d -i` (not a recipient). Relative to the working dir. Placeholder -- **set this to your own path.** |
+| `masterIdentity` | `"keys/age-yubikey-identity.txt"` | YubiKey identity file passed to `rage -d -i` (not a recipient). Relative to the working dir. Placeholder -- set this to your own path. |
 | `secretsDir` | `"secrets"` | Directory searched (depth 1) for a canary `.age` file. |
 | `name` | `agenix-<first word of subcommand>-pinprimed` | Package/binary name. |
 | `agenixBin` | `agenix-rekey`'s `agenix` | The agenix binary to exec. |
 
 ## Caveats
 
-- **`masterIdentity` must be an identity file, not a recipient.** Pointing it
+- `masterIdentity` must be an identity file, not a recipient. Pointing it
   at an `age1...` recipient (e.g. a `*.pub` export) makes the priming decrypt
   fail every time, which is only a warning here -- so the symptom you see is
   the original hang, not an obvious error.
-- The canary is *any* `.age` file that your master identity can decrypt. If
-  your first-found `.age` file is **not** encrypted to the master identity,
+- The canary is any `.age` file that your master identity can decrypt. If
+  your first-found `.age` file is not encrypted to the master identity,
   priming will fail (harmlessly) and the real agenix run will still hang --
   point `secretsDir` at a directory whose files the YubiKey can actually read.
 - PIN caching is a property of the card/session; if your card is configured to
-  require a **touch** or **PIN-per-operation**, one prime may not cover the
+  require a touch or PIN-per-operation, one prime may not cover the
   whole run. Adjust your YubiKey PIV touch/PIN policy accordingly.
-- Run it **interactively** -- the whole point is the one TTY prompt. Under a
+- Run it interactively -- the whole point is the one TTY prompt. Under a
   non-TTY invocation it silently skips priming (by design).
 
 ## Dependencies

@@ -200,7 +200,7 @@ def main() -> None:
         cat_cards.append(card(f"{cat}/index.md", f"{label} · {counts[cat]}", blurb, icon))
     cat_grid = "<div class=\"grid cards\" markdown>\n\n" + "\n".join(cat_cards) + "\n</div>\n"
 
-    home = textwrap.dedent(f"""\
+    home = textwrap.dedent("""\
         ---
         hide:
           - navigation
@@ -218,8 +218,8 @@ def main() -> None:
         prevents and the sharp edge that made it necessary. No hostnames, addresses,
         or secrets -- drop any recipe straight into your own configuration.
 
-        [Browse the recipes :material-arrow-right:](modules/index.md){{ .md-button .md-button--primary }}
-        [How it's organized :material-book-open-variant:](#how-its-organized){{ .md-button }}
+        [Browse the recipes :material-arrow-right:](modules/index.md){ .md-button .md-button--primary }
+        [How it's organized :material-book-open-variant:](#how-its-organized){ .md-button }
 
         </div>
 
@@ -227,24 +227,24 @@ def main() -> None:
 
         __CATGRID__
 
-        ## How it's organized {{ #how-its-organized }}
+        ## How it's organized { #how-its-organized }
 
         Recipes fall into five families. Everything is a Nix flake output, so a recipe
         is `nix flake`-consumable directly:
 
         ```nix
-        {{
+        {
           inputs.recipes.url = "github:eordano/recipes";
           # ... then, in a host:
           imports = [ inputs.recipes.nixosModules.nixos-hardening-tiers ];
           nixpkgs.overlays = [ inputs.recipes.overlays.caddy-override-keep-withplugins ];
-        }}
+        }
         ```
 
         - **Modules** -- importable `nixosModules.<name>`; opt-in via their own options.
         - **Behaviors** -- modules too, but timer/event-driven ones that *maintain* state.
         - **Overlays** -- `overlays.<name>`; upstream fixes, forks, platform patches.
-        - **Packages** -- `pkgs.callPackage ./packages/<name> {{ }}` derivations.
+        - **Packages** -- `pkgs.callPackage ./packages/<name> { }` derivations.
         - **Library** -- small reusable Nix functions.
         """).replace("__CATGRID__", cat_grid)
     write(SRC / "index.md", home)

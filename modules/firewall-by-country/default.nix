@@ -96,8 +96,8 @@ let
       countries,
     }:
     let
-      targetAction = if mode == "allowlist" then "accept" else "drop";
-      defaultAction = if mode == "allowlist" then "drop" else "accept";
+      targetAction = if mode == "allowlist" then "return" else "drop";
+      defaultAction = if mode == "allowlist" then "drop" else "return";
       uc = map toUpper countries;
     in
     optionalString enable ''
@@ -112,6 +112,12 @@ let
           ip6 daddr ${range} return
         '') allowRangesV6
       )}
+      ${optionalString (cfg.exemptTCPPorts != [ ])
+        "tcp dport { ${concatMapStringsSep ", " toString cfg.exemptTCPPorts} } return\n"
+      }
+      ${optionalString (cfg.exemptUDPPorts != [ ])
+        "udp dport { ${concatMapStringsSep ", " toString cfg.exemptUDPPorts} } return\n"
+      }
       ${concatMapStrings (country: "ip saddr @${nftCountrySet country} ${targetAction}\n") uc}
       ${optionalString ipv6Enabled (
         concatMapStrings (country: "ip6 saddr @${nftCountrySet6 country} ${targetAction}\n") uc
@@ -260,8 +266,8 @@ let
       sp = " ";
       interfaceFlag = if interfaceName == null then "" else "-i ${interfaceName}" + sp;
 
-      targetAction = if mode == "allowlist" then "ACCEPT" else "DROP";
-      defaultAction = if mode == "allowlist" then "DROP" else "ACCEPT";
+      targetAction = if mode == "allowlist" then "RETURN" else "DROP";
+      defaultAction = if mode == "allowlist" then "DROP" else "RETURN";
 
       uppercaseInterfaceCountries = map toUpper countries;
 
@@ -274,6 +280,15 @@ let
         ${ip6tables} -A ${chainName} ${interfaceFlag} -s ${range} -j RETURN
         ${ip6tables} -A ${chainName} ${interfaceFlag} -d ${range} -j RETURN
       '') allowRangesV6;
+
+      exemptRules =
+        bin:
+        concatMapStrings (port: ''
+          ${bin} -A ${chainName} ${interfaceFlag}-p tcp --dport ${toString port} -j RETURN
+        '') cfg.exemptTCPPorts
+        + concatMapStrings (port: ''
+          ${bin} -A ${chainName} ${interfaceFlag}-p udp --dport ${toString port} -j RETURN
+        '') cfg.exemptUDPPorts;
     in
     optionalString enable ''
       ${iptables} -N ${chainName} 2>/dev/null || ${iptables} -F ${chainName}
@@ -281,6 +296,8 @@ let
       ${iptables} -A ${chainName} ${interfaceFlag} -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 
       ${returnRulesV4}
+
+      ${exemptRules iptables}
 
       ${concatMapStrings (country: ''
         ${iptables} -A ${chainName} ${interfaceFlag}-m set --match-set ${countryToIpset country} src -j ${targetAction}
@@ -297,6 +314,8 @@ let
         ${ip6tables} -A ${chainName} ${interfaceFlag} -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 
         ${returnRulesV6}
+
+        ${exemptRules ip6tables}
 
         ${concatMapStrings (country: ''
           ${ip6tables} -A ${chainName} ${interfaceFlag}-m set --match-set ${countryToIpset6 country} src -j ${targetAction}
@@ -379,6 +398,29 @@ in
         List of two-letter country codes (ISO 3166-1 alpha-2, case-insensitive)
         to either allow or block globally, depending on mode.
       '';
+    };
+
+    exemptTCPPorts = mkOption {
+      type = types.listOf types.port;
+      default = [ ];
+      example = [ 443 ];
+      description = ''
+        TCP destination ports the country filter hands on to the rest of the
+        firewall from any country (RETURN before the country match). Use it
+        for the ports a remote client must reach from anywhere, such as a
+        VPN control plane or relay on 443; nixos-fw still decides whether the
+        port is open at all.
+      '';
+    };
+
+    exemptUDPPorts = mkOption {
+      type = types.listOf types.port;
+      default = [ ];
+      example = [
+        3478
+        41641
+      ];
+      description = "UDP destination ports the country filter hands on from any country, like exemptTCPPorts.";
     };
 
     extraAllowedRangesV4 = mkOption {

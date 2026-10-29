@@ -1,7 +1,7 @@
 # squid-ssl-bump-overlay
 
 Rebuild Squid with OpenSSL and the SSL-bump certificate generator/validator.
-The Squid that nixpkgs ships is built **without** SSL-bump, so
+The Squid that nixpkgs ships is built without SSL-bump, so
 `ssl_bump` / `sslcrtd_program` directives in your `squid.conf` will not work --
 the helper binaries they call were never compiled.
 
@@ -14,23 +14,23 @@ that are all off by default in nixpkgs:
 - The `security_file_certgen` helper (mints per-site certs on the fly).
 - The certificate validator.
 
-All three are **configure-time** features. You cannot turn them on with
+All three are configure-time features. You cannot turn them on with
 runtime config; the package has to be rebuilt.
 
 ## The traps
 
-1. **Three configure flags.** You must add `--with-openssl`,
+1. Three configure flags. You must add `--with-openssl`,
    `--enable-security-cert-generators`, and `--enable-security-cert-validators`.
    Miss any and the corresponding helper is silently absent.
 
-2. **No working `make install`.** This Squid build does not produce a usable
+2. No working `make install`. This Squid build does not produce a usable
    autotools install target, so the default `installPhase` gives you an empty
    or broken `$out`. The overlay copies the binaries and assets out of the
    build tree by hand. A `tree -la .` is left in the install phase on purpose:
    if a future Squid release moves a path, the build log shows the real layout
    so you can correct the `cp` lines.
 
-3. **`meta.knownVulnerabilities` blocks evaluation.** nixpkgs flags Squid with
+3. `meta.knownVulnerabilities` blocks evaluation. nixpkgs flags Squid with
    known vulnerabilities, which makes the derivation refuse to evaluate.
    `overrideAttrs` does not clear that, so the overlay resets it with
    `meta.knownVulnerabilities = [ ]`. This is opting out of a safety block --
@@ -65,15 +65,15 @@ your deployment's concern and is not covered here.
 ## Caveats
 
 - Clearing `knownVulnerabilities` means you are on your own for CVE tracking on
-  Squid. To keep that opt-out from silently swallowing *new* CVEs, the overlay
+  Squid. To keep that opt-out from silently swallowing new CVEs, the overlay
   `assert`s the Squid version it was audited against
   (`expectedSquidVersion`) -- a nixpkgs bump that changes the Squid version
   fails evaluation loudly. Re-check the new version's CVE status, then update
   the pin in `default.nix`.
-- **This is an overlay, so it redefines `pkgs.squid` machine-wide.** Every
+- This is an overlay, so it redefines `pkgs.squid` machine-wide. Every
   consumer of `squid` in your configuration -- not just the service you built it
   for -- gets this rebuild with the CVE block cleared, and the reset is
-  unconditional: a future nixpkgs bump that adds a *new* Squid CVE clears that
+  unconditional: a future nixpkgs bump that adds a new Squid CVE clears that
   too, silently. Prefer scoping the rebuild to the one service that needs it, or
   pin the accepted version (e.g. `nixpkgs.config.permittedInsecurePackages`) so a
   version change forces you to re-acknowledge the risk.

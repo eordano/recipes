@@ -68,7 +68,7 @@ in
     compression = mkOption {
       type = types.bool;
       default = true;
-      description = "Compress the forwarded Vector stream(s) on the wire.";
+      description = "Gzip the forwarded Vector stream(s) on the wire; Vector 0.58 takes a codec name, not a boolean.";
     };
 
     enableMetrics = mkOption {
@@ -240,6 +240,18 @@ in
       default = 1073741824;
       description = "Maximum size of Vector's on-disk sink buffer, in bytes.";
     };
+
+    extraForwardMetricsInputs = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "chrony_metrics" ];
+      description = ''
+        Vector components, added to services.vector.settings by another
+        module, whose metrics go to the forward-metrics sinks as they are,
+        without the host/instance/job tags label_metrics sets on scraped
+        exporters. Used only when enableMetrics forwards metrics.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.useVector {
@@ -257,6 +269,7 @@ in
     services.prometheus.exporters.node = mkIf cfg.enableMetrics {
       enable = true;
       port = 9100;
+      listenAddress = lib.mkDefault "127.0.0.1";
       enabledCollectors = lib.mkDefault [
         "systemd"
         "processes"
@@ -367,16 +380,15 @@ in
             # fails the regex. The aborting form (parse_regex!) turned every such
             # line into a Vector ERROR and DROPPED it. With the non-aborting
             # form we forward the raw line instead (tagged nginx_access_raw).
-            parsed, err = parse_regex(.message, r'^(?P<remote_addr>\S+) - (?P<remote_user>\S+) \[(?P<time_local>[^\]]+)\] "(?P<request>[^"]+)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referer>[^"]+)" "(?P<http_user_agent>[^"]+)" "(?P<host>[^"]+)"')
+            parsed, err = parse_regex(.message, r'^(?P<remote_addr>\S+) - (?P<remote_user>\S+) \[(?P<time_local>[^\]]+)\] "(?P<request>[^"]*)" (?P<status>\d+) (?P<body_bytes_sent>\d+) "(?P<http_referer>[^"]+)" "(?P<http_user_agent>[^"]+)" "(?P<vhost>[^"]+)"')
+            .host = "${config.networking.hostName}"
+            .labels.host = "${config.networking.hostName}"
             if err == null {
               . |= parsed
               .labels.source = "nginx_access"
-              .labels.host = "${config.networking.hostName}"
-              .labels.vhost = .host
-              del(.message)
+              .labels.vhost = .vhost
             } else {
               .labels.source = "nginx_access_raw"
-              .labels.host = "${config.networking.hostName}"
             }
           '';
         };
@@ -579,7 +591,7 @@ in
                   type = "vector";
                   inputs = [ "add_labels" ];
                   address = "${u}:${toString cfg.logsPort}";
-                  inherit (cfg) compression;
+                  compression = if cfg.compression then "gzip" else "none";
                   buffer = buf;
                   acknowledgements.enabled = true;
                   request = {
@@ -598,9 +610,9 @@ in
                     name = "forward_metrics_${sanitize u}";
                     value = {
                       type = "vector";
-                      inputs = [ "label_metrics" ];
+                      inputs = [ "label_metrics" ] ++ cfg.extraForwardMetricsInputs;
                       address = "${u}:${toString cfg.metricsPort}";
-                      inherit (cfg) compression;
+                      compression = if cfg.compression then "gzip" else "none";
                       buffer = buf;
                       acknowledgements.enabled = false;
                       request = {

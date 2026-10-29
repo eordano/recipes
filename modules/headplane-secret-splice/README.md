@@ -11,21 +11,21 @@ secret, an OIDC client secret, and a Headscale API key. The obvious NixOS
 approach -- put them in a `settings` option and let Nix render the YAML -- is
 wrong, and Headplane's own operational quirks make it worse:
 
-1. **A Nix-rendered config is world-readable in `/nix/store`.** Anything Nix
+1. A Nix-rendered config is world-readable in `/nix/store`. Anything Nix
    writes to the store is readable by every user on the machine. Secrets must
    not be in the store, so they cannot be part of the rendered `settings`.
 
-2. **Headplane hardcodes its paths.** It reads `/etc/headplane/config.yaml` and
+2. Headplane hardcodes its paths. It reads `/etc/headplane/config.yaml` and
    stores state under `/var/lib/headplane` unconditionally -- these are not
    configurable in the app, so the module has to write to them directly.
 
-3. **Headplane reads a *copy* of Headscale's config, not the live file.** It
+3. Headplane reads a copy of Headscale's config, not the live file. It
    won't notice when Headscale's config or DNS `extra_records.json` change, so
    something external has to poke it.
 
 ## The pattern
 
-- **Splice secrets at boot, as root, with `yq`.** Nix renders the
+- Splice secrets at boot, as root, with `yq`. Nix renders the
   secret-free config to the store. A `headplane-config-generator` root oneshot
   copies that into `/etc/headplane/config.yaml` and uses `yq eval -i` with
   `strenv(...)` to inject each secret read from its file. The secrets exist only
@@ -34,18 +34,18 @@ wrong, and Headplane's own operational quirks make it worse:
   interpolation keeps the secret out of the process argument list and handles
   arbitrary characters safely.
 
-- **Write to the hardcoded paths and lock them down.** The generator creates
+- Write to the hardcoded paths and lock them down. The generator creates
   `/etc/headplane` (`0750`) and `/var/lib/headplane` (`0700`), owned by the
   service user, and seeds a `0600` `users.json`.
 
-- **Sync + watch to force reloads.** `headplane-sync-headscale-config` copies
+- Sync + watch to force reloads. `headplane-sync-headscale-config` copies
   Headscale's rebuild-varying store config to a stable
   `/var/lib/headscale/config.yaml`. A `systemd.path` unit watches that file and
   `extra_records.json`; on change it triggers `headplane-reload`, which restarts
   Headplane. Watching the stable copy (not the store path, which changes name
   every rebuild) is what makes the path unit reliable.
 
-- **Ordering.** `headplane.service` runs `after` both the sync and the generator
+- Ordering. `headplane.service` runs `after` both the sync and the generator
   oneshots (and `headscale.service`), so it always starts against a fully
   spliced config and a fresh headscale copy. The oneshots are `partOf`
   headscale so they re-run when headscale restarts.
@@ -100,7 +100,7 @@ your setup differs.
 | `enable` | `false` | Turn the module on. |
 | `package` | `pkgs.headplane` | Headplane package to run. |
 | `user` / `group` | headscale's user/group | Service identity; needs read access to headscale state. |
-| `settings` | `{ }` | Freeform YAML config. **No secrets here.** |
+| `settings` | `{ }` | Freeform YAML config. No secrets here. |
 | `secretFiles.cookieSecret` | `null` | File -> `.server.cookie_secret`. |
 | `secretFiles.oidcClientSecret` | `null` | File -> `.oidc.client_secret`. |
 | `secretFiles.headscaleApiKey` | `null` | File -> `.headscale.api_key`. |

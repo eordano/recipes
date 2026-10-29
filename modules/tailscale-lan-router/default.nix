@@ -6,6 +6,13 @@
 }:
 let
   cfg = config.modules.lan-router;
+
+  keaInterfaces = {
+    interfaces = [ cfg.bridge.name ];
+    service-sockets-max-retries = 120;
+    service-sockets-retry-wait-time = 1000;
+    service-sockets-require-all = true;
+  };
   bridgeAddr4 = "${cfg.lan.v4.address}/${toString cfg.lan.v4.prefixLength}";
   bridgeAddr6 = lib.optionalString cfg.lan.v6.enable "${cfg.lan.v6.address}/${toString cfg.lan.v6.prefixLength}";
 
@@ -321,7 +328,7 @@ in
     services.kea.dhcp4 = {
       enable = true;
       settings = {
-        interfaces-config.interfaces = [ cfg.bridge.name ];
+        interfaces-config = keaInterfaces;
         lease-database = {
           type = "memfile";
           persist = true;
@@ -356,7 +363,7 @@ in
     services.kea.dhcp6 = lib.mkIf cfg.lan.v6.enable {
       enable = true;
       settings = {
-        interfaces-config.interfaces = [ cfg.bridge.name ];
+        interfaces-config = keaInterfaces;
         lease-database = {
           type = "memfile";
           persist = true;

@@ -1,13 +1,13 @@
 # self-hosted-firefox-sync
 
 Run your own Firefox Sync server ([`syncstorage-rs`](https://github.com/mozilla-services/syncstorage-rs))
-as a single self-contained container -- the sync server **and** its MariaDB
+as a single self-contained container -- the sync server and its MariaDB
 backend bundled into one hand-built OCI image, fronted by nginx + ACME.
 
 ## Why not `services.firefox-syncserver`?
 
 NixOS ships a `services.firefox-syncserver` module, but it wires syncserver to
-a *host* MySQL/MariaDB via the NixOS database modules. That drags in a
+a host MySQL/MariaDB via the NixOS database modules. That drags in a
 system-wide database just for one small service. This recipe takes the opposite
 approach: syncserver and a private MariaDB live together inside one image with a
 custom entrypoint, so the whole stack is a single container with two bind-mounted
@@ -19,7 +19,7 @@ The image has no init system, so the entrypoint does the sequencing by hand:
 
 1. `mkdir`/`chown` the datadir and socket dir,
 2. `mysql_install_db` on first boot only (guarded on `/var/lib/mysql/mysql`),
-3. launch `mariadbd` in the **background**,
+3. launch `mariadbd` in the background,
 4. poll `mysqladmin ping` for up to 30s until the socket answers, aborting
    early (`kill -0` on the recorded pid) if mariadbd dies while we wait,
 5. create the `syncstorage` and `tokenserver` databases (idempotent),
@@ -35,7 +35,7 @@ to outlive the shell, as a child of the exec'd PID 1.
 ### 1. uid/gid must agree in three places
 
 This is the one that silently breaks a bind-mounted database. The `mysql` user's
-uid/gid must be identical in **all three** of:
+uid/gid must be identical in all three of:
 
 - the host `firefox-sync` user (`users.users.firefox-sync.uid`),
 - the `0700` tmpfiles ownership of the data directories, and
@@ -51,7 +51,7 @@ exposes it as one `uid`/`gid` option that feeds all three spots.
 ### 2. syncserver has no port flag -- 8000 is hardcoded
 
 `syncserver` accepts only `--config` (a TOML file); there is no `--port` flag or
-port env var. With no config it binds its compiled-in default of **8000**. So the
+port env var. With no config it binds its compiled-in default of 8000. So the
 `port` option here is really "the port syncserver already listens on," and it must
 match the nginx `proxyPass`. If you truly need a different port you must also
 mount a config file setting `port = ...` -- changing the module option alone will
@@ -142,22 +142,22 @@ modules.services.firefox-sync.extraPodmanOptions = [ "--runtime=runsc" ];
 
 ## Security notes
 
-- **Bundled MariaDB root has no password.** The entrypoint leaves the `root`
+- Bundled MariaDB root has no password. The entrypoint leaves the `root`
   account on `unix_socket` auth (plus an empty password), and syncserver talks
   to the DB as root. mariadbd is started with `--bind-address=127.0.0.1` inside
   the container's own network namespace, so nothing on the host reaches it; the
   host-side node bootstrap goes through `<backend> exec`. The DB holds only your
   own sync blobs (encrypted client-side by Firefox).
-- **The entrypoint is world-readable.** It is emitted via `writeShellScript`, so
+- The entrypoint is world-readable. It is emitted via `writeShellScript`, so
   it lives in `/nix/store` readable by every local user. Keep real secrets out
   of it; the only sensitive value (`SYNC_MASTER_SECRET`) is passed separately via
   `secretsFile` and never baked into the image.
 
 ## Caveats
 
-- **Single instance.** MariaDB lives inside the container with its datadir on a
+- Single instance. MariaDB lives inside the container with its datadir on a
   host bind-mount; run exactly one instance against a given `mariadbDataDir`.
-- **Backups.** Everything durable is under `dataDir` / `mariadbDataDir`. Back those
+- Backups. Everything durable is under `dataDir` / `mariadbDataDir`. Back those
   up (or snapshot them) -- the container itself is disposable.
-- **First boot is slower.** `mysql_install_db` runs once on an empty datadir; give
+- First boot is slower. `mysql_install_db` runs once on an empty datadir; give
   the first start extra time before the ping loop's 30s budget matters.

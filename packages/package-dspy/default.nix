@@ -2,18 +2,15 @@
   lib,
   buildPythonPackage,
   fetchFromGitHub,
+  fetchpatch,
   setuptools,
   wheel,
   anyio,
-  asyncer,
-  backoff,
   cachetools,
   cloudpickle,
   diskcache,
-  joblib,
   json-repair,
   litellm,
-  magicattr,
   numpy,
   openai,
   optuna,
@@ -21,11 +18,8 @@
   pydantic,
   regex,
   requests,
-  rich,
   tenacity,
   tqdm,
-  ujson,
-  xxhash,
   gepa,
   anthropic,
   build,
@@ -35,6 +29,7 @@
   pytest,
   pytest-asyncio,
   pytest-mock,
+  pytest-xdist,
   ruff,
   langchain-core,
   mcp,
@@ -45,24 +40,31 @@
 }:
 buildPythonPackage rec {
   pname = "dspy";
-  version = "3.1.3";
+  version = "3.4.0";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "stanfordnlp";
     repo = "dspy";
     tag = version;
-    hash = "sha256-Mfl5ac367QnFgSHXTItBAQ0ksHR1mEKIjyptAbt/Bvc=";
+    hash = "sha256-xs2RxQZeVJAry4GwMG6nuSPSSW7Wt3ZDPLKaFwS+oyg=";
   };
+
+  patches = [
+    (fetchpatch {
+      name = "dspy-lazy-import-submodule-init.patch";
+      url = "https://github.com/stanfordnlp/dspy/commit/3c584233b0933d7f28b97c73a80d8e3a871ba000.patch";
+      hash = "sha256-Zg10xSI4n6mnE+CcPXlz5ajUGHqAU7afiIQIeUdME7U=";
+    })
+  ];
 
   postPatch = ''
     substituteInPlace dspy/__metadata__.py \
-      --replace-fail '__version__="3.1.2"' '__version__="${version}"'
+      --replace-fail '__version__="3.4.0b1"' '__version__="${version}"'
     substituteInPlace pyproject.toml \
-      --replace-fail 'version="3.1.2"' 'version="${version}"'
+      --replace-fail 'version="3.4.0b1"' 'version="${version}"'
     substituteInPlace pyproject.toml \
-      --replace-fail 'asyncer==0.0.8' 'asyncer>=0.0.8' \
-      --replace-fail 'gepa[dspy]==0.0.26' 'gepa[dspy]>=0.0.26'
+      --replace-fail 'gepa[dspy]==0.1.4' 'gepa[dspy]>=0.1.4'
   '';
 
   build-system = [
@@ -72,28 +74,19 @@ buildPythonPackage rec {
 
   dependencies = [
     anyio
-    asyncer
-    backoff
     cachetools
     cloudpickle
     diskcache
     gepa
-    joblib
     json-repair
     litellm
-    magicattr
-    numpy
     openai
-    optuna
     orjson
     pydantic
     regex
     requests
-    rich
     tenacity
     tqdm
-    ujson
-    xxhash
   ];
 
   optional-dependencies = {
@@ -104,11 +97,13 @@ buildPythonPackage rec {
       build
       datamodel-code-generator
       litellm
+      numpy
       pillow
       pre-commit
       pytest
       pytest-asyncio
       pytest-mock
+      pytest-xdist
       ruff
     ];
     langchain = [
@@ -117,10 +112,17 @@ buildPythonPackage rec {
     mcp = [
       mcp
     ];
+    numpy = [
+      numpy
+    ];
+    optuna = [
+      optuna
+    ];
     test_extras = [
       datasets
       langchain-core
       mcp
+      numpy
       optuna
       pandas
     ];
@@ -152,9 +154,11 @@ buildPythonPackage rec {
     "tests/predict/test_rlm.py"
     "tests/adapters"
     "tests/clients"
+    "tests/docs"
     "tests/predict"
     "tests/primitives"
     "tests/teleprompt"
+    "tests/test_lm15_subtree_updater.py"
   ];
 
   disabledTests = [

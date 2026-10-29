@@ -1,6 +1,6 @@
 # remote-luks-unlock
 
-Remotely unlock a LUKS-encrypted root over SSH from the **initrd**, so a
+Remotely unlock a LUKS-encrypted root over SSH from the initrd, so a
 headless / remote machine with full-disk encryption can finish booting without
 someone at the physical console.
 
@@ -11,7 +11,7 @@ That is fine for a laptop, but a headless server in another room (or another
 country) can never get past it -- there is no keyboard, no console, nobody to
 type the passphrase. The machine just sits in early boot forever.
 
-This module brings up **networking and an SSH server inside the initrd**, before
+This module brings up networking and an SSH server inside the initrd, before
 the root filesystem is unlocked. You SSH in, type the passphrase, and the boot
 continues. After that the initrd tears down and the normal system comes up.
 
@@ -70,7 +70,7 @@ ssh -t root@your-host
 
 Three non-obvious things will silently break a naive version of this. All are
 handled here, but they are worth understanding because they also govern how you
-*operate* it.
+operate it.
 
 ### 1. Answer with `--query`, not `--watch`
 
@@ -81,20 +81,20 @@ systemd-tty-ask-password-agent --query
 ```
 
 `--query` handles the one password request that is already pending, then
-**exits** -- so the SSH session closes cleanly on accept and the boot proceeds.
+exits -- so the SSH session closes cleanly on accept and the boot proceeds.
 The tempting alternative, `--watch`, blocks forever waiting for future prompts
 that never arrive, hanging your session. Use `--query`.
 
 ### 2. Connect with `ssh -t`
 
-The password agent needs a **tty**. If you connect without a PTY, the agent has
+The password agent needs a tty. If you connect without a PTY, the agent has
 no terminal to prompt on and the session just closes with no prompt at all.
 Always `ssh -t`.
 
 ### 3. Configure the interface, or SSH binds to nothing
 
 Without an explicit initrd network configuration, the interface comes up with
-**no address**. The SSH server starts and "listens", but nothing can reach it.
+no address. The SSH server starts and "listens", but nothing can reach it.
 This module always configures the interface -- a static address when
 `static.enable` is set, DHCP otherwise.
 
@@ -102,12 +102,12 @@ This module always configures the interface -- a static address when
 
 Know this before you rely on remote unlock:
 
-- The disk stays locked and initrd SSH stays reachable, so on a *typo* you can
+- The disk stays locked and initrd SSH stays reachable, so on a typo you can
   simply SSH in again with the correct passphrase.
-- **But `systemd-cryptsetup` gives up after 3 attempts.** Once you have entered
-  three wrong answers, there is **no pending request** anymore -- so
+- But `systemd-cryptsetup` gives up after 3 attempts. Once you have entered
+  three wrong answers, there is no pending request anymore -- so
   `--query` finds nothing to answer, and there is no way to trigger a fresh
-  prompt. The host is then locked out of remote unlock **until a reboot** puts
+  prompt. The host is then locked out of remote unlock until a reboot puts
   it back at attempt one.
 
 In short: remote unlock buys you convenience, not infinite retries. If you fat-
@@ -116,7 +116,7 @@ power cycle / a smart PDU) to try again. Plan a reboot path accordingly.
 
 ## Notes
 
-- Use **dedicated** initrd host keys, separate from the running system's host
+- Use dedicated initrd host keys, separate from the running system's host
   keys. Their fingerprints differ from the booted system; pin them under a
   distinct `known_hosts` / `HostKeyAlias` entry so SSH does not warn on the
   identity change between the initrd and the full system.

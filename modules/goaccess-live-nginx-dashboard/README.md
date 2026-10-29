@@ -13,7 +13,7 @@ WebSocket. Wiring that up cleanly on NixOS means gluing together a custom
 package build, a systemd service, an nginx vhost with a WebSocket proxy, and
 GeoIP data. This module packages all of it behind a handful of options.
 
-The dashboard exposes **full visitor logs**, so it is never public: both the
+The dashboard exposes full visitor logs, so it is never public: both the
 static page (`/`) and the WebSocket (`/ws`) are locked to an `allowedIPs`
 allow-list, with `deny all` behind it.
 
@@ -38,13 +38,13 @@ on older pins and on a `goaccess` overridden with `withGeolocation = false`.
 
 GoAccess's `--log-format`/`--date-format`/`--time-format` strings are full of
 `%` directives (`%h`, `%d`, `%t`, ...). Those strings are interpolated into a
-**systemd `ExecStart=`**, and in a systemd unit a bare `%` is a *specifier*
+systemd `ExecStart=`, and in a systemd unit a bare `%` is a specifier
 (`%h` = the user's home directory, etc.). systemd would silently rewrite your
 format before GoAccess ever saw it.
 
 The fix is to double every percent: `%%h`, `%%d`, `%%t`. `%%` is systemd's
 literal-percent escape; it collapses back to a single `%` before the argument
-reaches GoAccess. **This is not a Nix quirk** -- `%` is not special in Nix
+reaches GoAccess. This is not a Nix quirk -- `%` is not special in Nix
 strings -- it is purely a systemd-unit escaping rule. The default `logFormat`
 in this module is already correctly doubled; keep any custom format doubled
 too. (Named presets like `COMBINED` contain no `%` and need no escaping.)
@@ -79,10 +79,10 @@ yourself).
 | --- | --- | --- |
 | `enable` | `false` | Turn the module on. |
 | `domain` | -- (required) | FQDN the dashboard is served on. |
-| `allowedIPs` | loopback + RFC1918 | IPs/CIDRs allowed to view `/` and `/ws`. **Set this.** |
+| `allowedIPs` | loopback + RFC1918 | IPs/CIDRs allowed to view `/` and `/ws`. Set this. |
 | `useACMEHost` | `null` | Reuse a named ACME cert; `null` = request own cert. |
 | `accessLog` | `/var/log/nginx/access.log` | Log GoAccess tails. |
-| `logFormat` | combined + vhost | `--log-format`, percent signs **doubled**. |
+| `logFormat` | combined + vhost | `--log-format`, percent signs doubled. |
 | `dataDir` | `/var/lib/goaccess` | On-disk DB + rendered HTML. |
 | `realTimePort` | `7890` | Loopback port for the WebSocket feed. |
 | `htmlTitle` | `Web Server Analytics` | Title rendered at the top of the dashboard. |
@@ -100,13 +100,13 @@ follow the same conventions (percent signs doubled for the format strings).
 
 The geo map needs GeoLite2 `.mmdb` files. Two ways to supply them:
 
-- **Provision them yourself (default / recommended).** With
+- Provision them yourself (default / recommended). With
   `geoipUpdater.enable = false` (the default) you populate `geoipDatabaseDir`
   another way -- e.g. nixpkgs' `services.geoipupdate` with a free MaxMind
   license key. The GoAccess service `preStart` hard-fails if the first
   configured database is missing, so you get a clear error instead of an
   empty map.
-- **Bundled updater (opt-in).** `geoipUpdater.enable = true` installs a systemd
+- Bundled updater (opt-in). `geoipUpdater.enable = true` installs a systemd
   timer that downloads the databases into `geoipDatabaseDir`. It pulls from a
   public GitHub mirror that republishes MaxMind's GeoLite2 files **without an
   account or license key**. Trade-off: you trust that mirror's freshness and
@@ -120,16 +120,16 @@ once.
 
 ## Notes & caveats
 
-- **`--persist` / `--restore`.** GoAccess's DB is in-memory; these flags
+- `--persist` / `--restore`. GoAccess's DB is in-memory; these flags
   checkpoint it to `dataDir/db` so history survives restarts. Without them a
   restart drops all history back to the log file's current window.
-- **`nginx` group membership.** The GoAccess user joins the `nginx` group (to
+- `nginx` group membership. The GoAccess user joins the `nginx` group (to
   read the access log) and the `nginx` user joins the dashboard's group (to
   serve the generated HTML). Both directions are needed.
-- **WebSocket URL.** The service advertises `wss://<domain>/ws`, matching the
+- WebSocket URL. The service advertises `wss://<domain>/ws`, matching the
   nginx `/ws` proxy location with a long `proxy_read_timeout` so the live socket
   stays open.
-- **Firewall.** `realTimePort` is bound to `127.0.0.1` and reverse-proxied by
+- Firewall. `realTimePort` is bound to `127.0.0.1` and reverse-proxied by
   nginx, so it does not need to be open. `openFirewall` exists for unusual
   topologies but defaults off.
 
@@ -138,14 +138,14 @@ once.
 - **The bundled updater trusts a third-party mirror -- that's why it's off by
   default.** With `geoipUpdater.enable = true`, a weekly timer fetches `.mmdb`
   binaries over HTTPS from a public GitHub account that republishes MaxMind's
-  GeoLite2 files. There is **no checksum/signature verification**, so enabling
+  GeoLite2 files. There is no checksum/signature verification, so enabling
   it means trusting that account indefinitely: if it is compromised or
   hijacked, the replaced database is downloaded automatically on the next run
   and parsed by `libmaxminddb` inside the GoAccess process. Prefer the default
   posture of provisioning the databases yourself (e.g. nixpkgs'
   `services.geoipupdate` with a MaxMind license key), or point
   `geoipUpdater.databases` at MaxMind's own authenticated URLs.
-- **The rendered dashboard contains full visitor logs.** The webroot
+- The rendered dashboard contains full visitor logs. The webroot
   (`dataDir/html`) is mode `0750`, owned by the GoAccess group that nginx joins,
   so local accounts outside that group cannot read it off disk. The IP
   allow-list (`allowedIPs`) is the only thing keeping it off the network -- keep

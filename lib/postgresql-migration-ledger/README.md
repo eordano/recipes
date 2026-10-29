@@ -15,7 +15,7 @@ fail in three quiet, expensive ways.
 The first is the one that actually bites in production. A guard like "if the
 marker table from `0001` exists, we are migrated, exit" works perfectly until
 you add `0003`. Every database that has ever run `0001` now reports "migrated"
-and silently skips `0003` -- and `0004`, and everything after -- **forever**. The
+and silently skips `0003` -- and `0004`, and everything after -- forever. The
 unit is green, the newest migrations never land, and the breakage surfaces as a
 missing column somewhere far from the migration code. A single all-or-nothing
 sentinel row is the same bug wearing a table.
@@ -29,7 +29,7 @@ psql -v name="$name" -tAf - <<<"select ... where filename = :'name'"  # :'name' 
 ```
 
 `psql` interpolates `:'name'` (and `:name`, `:"name"`) only for input read from
-a **file or stdin**. For `-c` the literal four characters `:'name'` are sent to
+a file or stdin. For `-c` the literal four characters `:'name'` are sent to
 the server, which either errors or, worse, matches nothing and quietly reports
 "not applied" for every file. So the variable-bearing statements have to go in
 on stdin, never through `-c`.
@@ -99,7 +99,7 @@ pg.mkMigrate {
 
 ## Traps the helper is shaped around
 
-**1. The ledger is per file, not a sentinel.** The `filename text PRIMARY KEY`
+1. The ledger is per file, not a sentinel. The `filename text PRIMARY KEY`
 is the entire point. Do not "optimise" it into a single boolean, a version
 number you bump, or a check for one marker table -- each of those makes every
 migration added after the marker was first written look already applied, on
@@ -108,7 +108,7 @@ because the unit still exits 0; you find it later as a missing column. If you
 must reason about a version number, derive it from `max(filename)` in the
 ledger; keep the row-per-file underneath.
 
-**2. `:'name'` only expands from a file or stdin, never from `-c`.** This is why
+2. `:'name'` only expands from a file or stdin, never from `-c`. This is why
 both variable-bearing statements -- the existence probe and the `INSERT` -- are
 piped in and read with `-f -` rather than passed with `-c`. `psql` variable
 interpolation (`:name`, `:'name'`, `:"name"`) is a feature of the input
@@ -116,7 +116,7 @@ processor that reads scripts, and `-c` bypasses it. Build the SQL string with
 the variable syntax and let `psql` do the quoting; do not `printf` the filename
 into the SQL yourself, and do not reach for `-c` "just for the probe".
 
-**3. The file and its ledger row share one transaction.** `--single-transaction`
+3. The file and its ledger row share one transaction. `--single-transaction`
 with `-f "$f" -f -` wraps the migration file and the trailing `INSERT` (on
 stdin) in a single `BEGIN`/`COMMIT`. If any statement in the file fails, the
 ledger row is never written, so the next run retries the file from a clean
@@ -135,15 +135,15 @@ atomic cannot honour trap 3. If you genuinely need one, apply it as its own
 step outside this helper and record it in the ledger yourself, understanding
 that it is not crash-safe.
 
-**5. Re-running a file must be harmless in the adoption case.** The ledger stops
-already-recorded files from re-running, but the *first* run against a database
+5. Re-running a file must be harmless in the adoption case. The ledger stops
+already-recorded files from re-running, but the first run against a database
 that predates the ledger will apply `0001` and `0002` to a schema that may
 already have their objects. Write your DDL as `CREATE TABLE IF NOT EXISTS` /
 `ADD COLUMN IF NOT EXISTS` so that first adoption pass is a no-op rather than a
 `relation already exists` failure. After adoption every file runs exactly once
 regardless.
 
-**6. Who runs the unit decides how it authenticates.** The script connects with
+6. Who runs the unit decides how it authenticates. The script connects with
 `-h /run/postgresql` (the local socket) and no password, which relies on
 `peer` authentication: the system user must map to a PostgreSQL role with
 access to the database. Run the service as `postgres` (or as the role that owns
@@ -157,16 +157,16 @@ creates the database, the role, or grants -- order the unit `after` and
 `import ./lib/postgresql-migration-ledger { inherit pkgs; }` returns:
 
 | attribute | meaning |
-|-----------|---------|
+|---|---|
 | `mkMigrate` | `{ ... } -> package` exposing `bin/<name>`, the migration loop |
 | `mkMigrateService` | same arguments plus `user` / `group` / `serviceConfig`; returns a value for `systemd.services.<name>` |
 
 `mkMigrate` arguments:
 
 | argument | default | meaning |
-|----------|---------|---------|
-| `migrations` | *(required)* | Directory containing `NNNN-name.sql` files; applied in glob (sorted) order. |
-| `database` | *(required)* | Database name passed to `psql -d`. |
+|---|---|---|
+| `migrations` | (required) | Directory containing `NNNN-name.sql` files; applied in glob (sorted) order. |
+| `database` | (required) | Database name passed to `psql -d`. |
 | `name` | `"pg-migrate"` | Binary and derivation name. |
 | `ledgerTable` | `"public.schema_migrations"` | Qualified ledger table name; created `IF NOT EXISTS`. Injected into the SQL at build time -- keep it a static, trusted string. |
 | `host` | `"/run/postgresql"` | `psql -h`; a socket directory for peer auth, or a hostname. |
@@ -193,14 +193,14 @@ nix-build ./lib/postgresql-migration-ledger/test-migration-ledger.nix
 
 ## Caveats
 
-- The `migrations` directory is read at *runtime* from the store path you pass,
+- The `migrations` directory is read at runtime from the store path you pass,
   not inlined at evaluation time. It must be a store path (or an absolute path)
   that exists when the unit runs; a relative path resolves against the working
   directory of the service, which you do not control.
 - `ON_ERROR_STOP=1` is always set, so any error in the probe or the migration
   aborts the run with a non-zero exit. That is what makes the unit's failure
   honest -- do not add `|| true`.
-- The ledger records *that* a file ran, not its contents or a checksum. Editing
+- The ledger records that a file ran, not its contents or a checksum. Editing
   a file that has already been applied will not re-run it. Treat applied
   migrations as immutable and add a new `NNNN-` file for further changes.
 - Nothing here manages roles, ownership, or grants, and the migrations run with

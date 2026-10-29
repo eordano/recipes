@@ -37,6 +37,22 @@ let
   haveAdminPw = cfg.adminPasswordFile != null;
 
   useVictoria = cfg.backend == "victoria";
+
+  grafanaPlugin =
+    pkgs.grafanaPlugins.grafanaPlugin
+      or (pkgs.callPackage "${pkgs.path}/pkgs/servers/monitoring/grafana/plugins/grafana-plugin.nix" { });
+  externalizedDatasources = {
+    prometheus = grafanaPlugin {
+      pname = "prometheus";
+      version = "13.2.4";
+      zipHash = "sha256-9pEz5kqWbxgwDRmcJygvSnG3pgIPsIkb4A+vAHREumA=";
+    };
+    loki = grafanaPlugin {
+      pname = "loki";
+      version = "13.2.2";
+      zipHash = "sha256-jQnd1GU++r86pNMdqYrqnkbONdj4vXe97lzkZaWHa+g=";
+    };
+  };
   useLoki = !useVictoria;
 
   journalStage = if useVictoria then "central_journal" else "drop_loki_query_cancel_noise";
@@ -108,6 +124,19 @@ in
       type = types.str;
       description = "Domain name for the Grafana web interface (used as the nginx vhost).";
       example = "logs.example.com";
+    };
+
+    rootUrl = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "https://logs.example.com/";
+      description = ''
+        Public URL Grafana is reached at: Grafana's `[server] root_url`, which
+        Grafana 13's Live websocket also checks the request Origin against.
+        null keeps Grafana's default (`protocol://domain:port/`), which is only
+        right when browsers talk to port 3000 directly. `enableNginx` fills it
+        from the vhost; a wrapper with its own reverse proxy sets it.
+      '';
     };
 
     user = mkOption {
@@ -209,6 +238,18 @@ in
       type = types.int;
       default = 4045;
       description = "TCP port Vector listens on for pushed METRICS (vector-protocol source).";
+    };
+
+    extraMetricsInputs = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      example = [ "chrony_metrics" ];
+      description = ''
+        Vector components on this host, added to services.vector.settings by
+        another module, whose metrics are stored as they are next to the pushed
+        ones (`agent_metrics`). The receiver forwards nothing upstream, so this
+        is how metrics its own Vector makes reach the metrics database.
+      '';
     };
 
     lokiPort = mkOption {
@@ -370,9 +411,10 @@ in
       GeoIP enrichment of incoming logs. When on, Vector augments any event
       carrying a `.remote_addr`, `.src_ip` or `.attacker_ip` field with
       `.geoip.{country_code,city,as_number,as_org}` plus a Loki `country`
-      label. RFC1918 / CGNAT / loopback addresses are skipped so only real
-      external IPs hit the lookup. You must provide the GeoLite2 databases
-      (see geoipDatabaseDir) -- this module does not download them
+      label. RFC1918 / CGNAT / loopback / link-local / ULA addresses skip the
+      lookup and get `country = "internal"`, so only real external IPs hit
+      it. You must provide the GeoLite2 databases (see geoipDatabaseDir) --
+      this module does not download them
     '';
 
     geoipDatabaseDir = mkOption {
@@ -501,6 +543,9 @@ in
 
   config = mkIf cfg.enable (mkMerge [
     (mkIf cfg.enableNginx {
+      services.push-observability-receiver.rootUrl = mkDefault "${
+        if cfg.acmeHost != null then "https" else "http"
+      }://${cfg.domain}/";
       services.nginx.enable = true;
       services.nginx.virtualHosts.${cfg.domain} = {
         forceSSL = cfg.acmeHost != null;
@@ -824,7 +869,7 @@ in
 
                 if exists(.labels.unit) && string!(.labels.unit) == "sshd.service" && exists(.message) {
                   msg = string!(.message)
-                  m = parse_regex(msg, r'(?:from|by(?: authenticating user \S+)?) (?P<ip>\d+\.\d+\.\d+\.\d+)') ?? null
+                  m = parse_regex(msg, r'(?:from|by|with)(?: (?:authenticating |invalid )?user \S*)? (?P<ip>\d+\.\d+\.\d+\.\d+|[0-9a-fA-F]*:[0-9a-fA-F:.]*[0-9a-fA-F])') ?? null
                   if m != null {
                     .attacker_ip = m.ip
                   }
@@ -857,7 +902,9 @@ in
                                (ip_cidr_contains("::1/128", ip) ?? false) ||
                                (ip_cidr_contains("fc00::/7", ip) ?? false) ||
                                (ip_cidr_contains("fe80::/10", ip) ?? false)
-                  if !is_private {
+                  if is_private {
+                    .labels.country = "internal"
+                  } else {
                     geo, err = get_enrichment_table_record("geoip_table", { "ip": ip })
                     if err == null && geo != null {
                       .geoip = {}
@@ -911,7 +958,7 @@ in
 
             sinks.prometheus = {
               type = "prometheus_remote_write";
-              inputs = [ "agent_metrics" ];
+              inputs = [ "agent_metrics" ] ++ cfg.extraMetricsInputs;
               endpoint = "http://127.0.0.1:${toString cfg.prometheusPort}/api/v1/write";
               healthcheck.enabled = false;
               request = {
@@ -936,7 +983,7 @@ in
 
             sinks.victoriametrics = {
               type = "prometheus_remote_write";
-              inputs = [ "agent_metrics" ];
+              inputs = [ "agent_metrics" ] ++ cfg.extraMetricsInputs;
               endpoint = "http://127.0.0.1:${toString cfg.victoriaMetricsPort}/api/v1/write";
               healthcheck.enabled = false;
               request = {
@@ -1049,6 +1096,7 @@ in
       services.prometheus.exporters.node = {
         enable = true;
         port = cfg.nodeExporterPort;
+        listenAddress = "127.0.0.1";
         enabledCollectors = [
           "systemd"
           "processes"
@@ -1073,7 +1121,17 @@ in
       services.grafana = {
         enable = true;
         dataDir = "${cfg.dataDir}/grafana";
-        declarativePlugins = mkIf useVictoria [ pkgs.grafanaPlugins.victoriametrics-logs-datasource ];
+        declarativePlugins =
+          if useVictoria then
+            [
+              pkgs.grafanaPlugins.victoriametrics-logs-datasource
+              pkgs.grafanaPlugins.victoriametrics-metrics-datasource
+            ]
+          else
+            [
+              externalizedDatasources.prometheus
+              externalizedDatasources.loki
+            ];
         provision = {
           datasources.settings.datasources = [
             {
@@ -1090,11 +1148,11 @@ in
             }
             {
               name = "Prometheus";
-              type = "prometheus";
+              type = if useVictoria then "victoriametrics-metrics-datasource" else "prometheus";
               uid = "prometheus";
               url =
                 if useVictoria then
-                  "http://localhost:${toString cfg.victoriaMetricsPort}/prometheus"
+                  "http://localhost:${toString cfg.victoriaMetricsPort}"
                 else
                   "http://localhost:${toString cfg.prometheusPort}";
               access = "proxy";
@@ -1125,7 +1183,8 @@ in
             http_port = cfg.grafanaPort;
             protocol = "http";
             http_addr = "127.0.0.1";
-          };
+          }
+          // optionalAttrs (cfg.rootUrl != null) { root_url = cfg.rootUrl; };
           analytics = {
             enabled = false;
             reporting_enabled = false;

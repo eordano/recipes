@@ -1,7 +1,7 @@
 # nixos-test-topology
 
 A topology builder and fixture library for `pkgs.testers.runNixOSTest`. Declare
-subnets and hosts once; get back per-node NixOS modules that assign **exactly**
+subnets and hosts once; get back per-node NixOS modules that assign exactly
 the addresses you asked for, plus those addresses as plain strings for the
 testScript. Ships with a secrets stub, a source-address echo server, and a
 netfilter FORWARD-hook packet counter -- the instrument that separates "the
@@ -14,7 +14,7 @@ Everything below was re-verified against nixpkgs 26.11 (`nixos-unstable`,
 
 The NixOS test framework assigns IP addresses for you, and the scheme it uses is
 not written down anywhere a test author will find it. Hand-picking an address in
-a multi-node test is therefore a gamble against your own node *naming*, and when
+a multi-node test is therefore a gamble against your own node naming, and when
 you lose, the symptom appears somewhere else entirely -- a `wait_until_succeeds`
 that hangs in an unrelated later step, because two machines are ARPing for one
 address.
@@ -54,8 +54,8 @@ nodeNumbers = listToAttrs (
 ```
 
 -- `nixos/lib/testing/network.nix:25-27`. `builtins.attrNames` returns keys
-**sorted**, so a node's address is decided by where its name falls
-alphabetically among *all* nodes in the test. Add a node called `aardvark` later
+sorted, so a node's address is decided by where its name falls
+alphabetically among all nodes in the test. Add a node called `aardvark` later
 and every existing node shifts by one.
 
 Probe with three nodes declared in the order `zulu, alpha, mike`, all on vlan 1:
@@ -69,7 +69,7 @@ Source order is irrelevant; `alpha < mike < zulu` is what decided it.
 ## Trap 2 -- `networking.interfaces.*.ipv4.addresses` is a LIST, so it MERGES
 
 Set an address by hand next to `virtualisation.vlans` and you do not replace the
-framework's; you *append* to it. The framework writes its definition through
+framework's; you append to it. The framework writes its definition through
 `networking.interfaces = listToAttrs ipInterfaces`
 (`nixos/lib/testing/network.nix:57`), and list options concatenate.
 
@@ -87,7 +87,7 @@ later, wherever traffic to `alpha` happens to land on `mike`.
 
 The obvious repair is `lib.mkForce [ { address = ...; } ]`. It does clean up the
 interface, and it leaves a phantom behind. `networking.primaryIPAddress` is
-computed from the network module's **own local `ipInterfaces` binding**, not
+computed from the network module's own local `ipInterfaces` binding, not
 from `config.networking.interfaces`
 (`nixos/lib/testing/network.nix:59-61`), so forcing the option the module wrote
 does not change what the module already computed. And every peer's `/etc/hosts`
@@ -104,7 +104,7 @@ mike's primaryIPAddress  = "192.168.1.2"              # phantom
                          2001:db8:1::2 mike
 ```
 
-So `mike` resolves to two addresses: one that belongs to a *different machine*
+So `mike` resolves to two addresses: one that belongs to a different machine
 and one that belongs to nobody. `getent hosts mike` will happily return either.
 
 ## The correct fix
@@ -116,7 +116,7 @@ networking.primaryIPAddress = lib.mkForce "10.1.0.50";
 ```
 
 Note which `mkForce` survives. `assignIP = false` leaves the framework's
-`ipInterfaces` list empty, but `networking.primaryIPAddress` is still *defined*
+`ipInterfaces` list empty, but `networking.primaryIPAddress` is still defined
 by the framework -- as `""` (`nixos/lib/testing/network.nix:59-60`, the
 `optionalString` else-branch). A plain definition is therefore a conflict, not
 an override. Without `mkForce` you get:
@@ -129,7 +129,7 @@ error: The option `nodes.browser.networking.primaryIPAddress' has conflicting de
 
 `mkForce` on `primaryIPAddress` = required. `mkForce` on
 `networking.interfaces.*` = the wrong fix for Trap 2. `mkTopology` does the
-former and never the latter, and emits assertions that fail the *evaluation* if
+former and never the latter, and emits assertions that fail the evaluation if
 either invariant breaks -- one asserting `virtualisation.vlans == []`, one
 asserting each topology interface carries exactly one IPv4 address, one
 asserting `primaryIPAddress` is the address you declared.
@@ -137,7 +137,7 @@ asserting `primaryIPAddress` is the address you declared.
 ### What upstream does not do
 
 `assignIP` exists and is correct, but it is effectively undiscoverable. In the
-whole nixpkgs tree it appears in **exactly one test** --
+whole nixpkgs tree it appears in exactly one test --
 `nixos/tests/systemd-initrd-bridge.nix:31` and `:35` -- where it is set to
 `false` with no comment, next to a bare
 `networking.primaryIPAddress = lib.mkForce "192.168.1.${nodeNumber}"` on line 27
@@ -153,29 +153,29 @@ If the guest and the destination sit on the same subnet, the guest ARPs the
 destination directly. The packet never enters the `FORWARD` hook, your filter
 never runs, and a test asserting "blocked request fails / allowed request
 succeeds" passes for reasons that have nothing to do with the rule under test.
-The inverse is worse: a "blocked" request that *succeeds* looks like a filter
+The inverse is worse: a "blocked" request that succeeds looks like a filter
 bug when in fact the traffic bypassed the router.
 
-This is not hypothetical: a forward-chain counter reading **zero packets**
+This is not hypothetical: a forward-chain counter reading zero packets
 while a supposedly-blocked request completes normally is the signature. The
 rule is fine. The topology is not.
 
 Two defences, both in this recipe:
 
-1. **Put them on different subnets** and assert it. The example does
+1. Put them on different subnets and assert it. The example does
    `ip route get <destination>` on the guest and requires the answer to contain
    `via <router>` -- if the destination is ever on-link, that assertion fails
    before any filtering claim is made.
-2. **Count what reaches the hook.** `fixtures.forwardCounter` installs a
+2. Count what reaches the hook. `fixtures.forwardCounter` installs a
    counting base chain on the `forward` hook and gives you `<name>-count` and
-   `<name>-reset` on `PATH`. A blocked-traffic subtest must assert *both* that
-   the request failed *and* that the counter incremented; otherwise it is
+   `<name>-reset` on `PATH`. A blocked-traffic subtest must assert both that
+   the request failed and that the counter incremented; otherwise it is
    indistinguishable from an ARP-level bypass.
 
 Two implementation notes on the counter:
 
 - It is its own `nf_tables` table at `priority -300` with `policy accept`, loaded
-  by a dedicated oneshot -- **not** through `networking.firewall.extraCommands`.
+  by a dedicated oneshot -- not through `networking.firewall.extraCommands`.
   nixpkgs hard-asserts that option is empty under the nftables backend
   (`nixos/modules/services/networking/firewall-nftables.nix:65-66`:
   `assertion = cfg.extraCommands == ""`), so an `extraCommands`-based counter
@@ -192,15 +192,15 @@ Two implementation notes on the counter:
 Two independent ways to write a green test around a secret that is broken in
 production.
 
-**Wrong path.** Stub the provider at a path of your own choosing and the module
-under test reads *your* path in the test and the *real* provider's path on the
+Wrong path. Stub the provider at a path of your own choosing and the module
+under test reads your path in the test and the real provider's path on the
 deployment. `fixtures.secretsStub` defaults `runDir` to `/run/agenix` and
 derives `path = "${runDir}/${name}"` from the secret's attribute name -- the same
 default the real module set uses. Change `runDir` to match whatever provider you
 actually run; do not change the shape.
 
-**Wrong ordering.** Creating the file is not the hard part; guaranteeing it
-exists *before* its consumer starts is. The stub emits a `Type=oneshot` +
+Wrong ordering. Creating the file is not the hard part; guaranteeing it
+exists before its consumer starts is. The stub emits a `Type=oneshot` +
 `RemainAfterExit=true` seeder that is `Before=` every unit named in `consumers`,
 and injects `After=`/`Requires=` on the consumer side as well. The redundancy is
 deliberate: `Before=` only orders units inside one transaction, so a consumer
@@ -209,7 +209,7 @@ would otherwise race. The example test proves this by stopping both units,
 deleting the secret, starting only the consumer, and asserting the secret is
 back.
 
-`systemd.tmpfiles.settings` is the right upstream primitive for *directories*
+`systemd.tmpfiles.settings` is the right upstream primitive for directories
 and empty files here, but not for this: its `f` argument cannot contain
 newlines, it only writes when the file is absent, and it runs once at boot, so
 it cannot re-seed a `/run` secret that a test deliberately removed.
@@ -225,7 +225,7 @@ recipe-plus-adapter layout stops evaluating.
 When a private module becomes a thin adapter that does
 `imports = [ (basePath + "/vendor/recipes/modules/<name>") ]` -- where `basePath`
 is whatever argument your repo threads the checkout root through -- that path is
-consumed **in `imports`**. It therefore has to arrive as a `specialArg`;
+consumed in `imports`. It therefore has to arrive as a `specialArg`;
 supplying it through a node's `_module.args` is infinite recursion, because
 `config` would depend on `imports`. A test that imports the adapter and forgets
 `node.specialArgs.basePath` does not fail an assertion -- it fails to evaluate,
@@ -255,9 +255,9 @@ adapter itself is the subject under test.
 
 `subnets.<name>`:
 
-| key             | default              | meaning |
-|-----------------|----------------------|---------|
-| `vlan`          | *(required)*         | VLAN id, 1-255. 0 would collide with the VM's own `eth0`; `nixos/lib/qemu-common.nix` throws above 255. |
+| key | default | meaning |
+|---|---|---|
+| `vlan`          | (required)         | VLAN id, 1-255. 0 would collide with the VM's own `eth0`; `nixos/lib/qemu-common.nix` throws above 255. |
 | `prefix`        | `"10.<vlan>.0"`      | First three octets. Deliberately off `192.168.*` so a stray auto-assigned address is visibly foreign. |
 | `prefixLength`  | `defaultPrefixLength`| |
 | `prefix6`       | `null`               | e.g. `"fd00:1::"`; enables IPv6 on this subnet. |
@@ -266,10 +266,10 @@ adapter itself is the subject under test.
 
 `hosts.<name>`:
 
-| key         | default                 | meaning |
-|-------------|-------------------------|---------|
-| `addresses` | *(required)*            | `{ <subnet> = <last octet 1-254>; }` |
-| `via`       | *(none)*                | Default route through that host, on the first subnet they share. |
+| key | default | meaning |
+|---|---|---|
+| `addresses` | (required)            | `{ <subnet> = <last octet 1-254>; }` |
+| `via` | (none) | Default route through that host, on the first subnet they share. |
 | `forward`   | `false`                 | Sets `net.ipv4.ip_forward` and `net.ipv6.conf.all.forwarding`. |
 | `primary`   | alphabetically first    | Which subnet's address becomes `networking.primaryIPAddress`. |
 
@@ -291,8 +291,8 @@ topo.alias.<host>.<subnet>   "origin-uplink"  (resolvable on every node)
 topo.subnets / topo.hosts    normalised inputs
 ```
 
-**Why the aliases exist.** The framework's `/etc/hosts` only ever publishes each
-node's *primary* address plus addresses on VLANs the two nodes share
+Why the aliases exist. The framework's `/etc/hosts` only ever publishes each
+node's primary address plus addresses on VLANs the two nodes share
 (`nixos/lib/testing/network.nix:70-110`), and `mkTopology` leaves
 `virtualisation.vlans` empty, so the shared-VLAN half contributes nothing. A
 multi-homed node's bare hostname therefore resolves to one leg only, and a peer
@@ -302,10 +302,10 @@ so `<host>-<subnet>` always resolves to the right leg.
 ### Fixtures
 
 | fixture | signature |
-|---------|-----------|
+|---|---|
 | `fixtures.optionStub` | `{ "home.programs" = {}; "visual" = false; } -> module` -- declares foreign option paths as `types.anything` so a module under test can read an option tree whose real provider is not imported. |
 | `fixtures.secretsStub` | `{ namespace ? "age", runDir ? "/run/agenix", contents ? {}, defaultContent ? ..., consumers ? [], unitName ? "test-secrets-seed" } -> module` |
-| `fixtures.httpEcho` | `{ name ? "http-echo", port ? 8080, listen ? "0.0.0.0" } -> module` -- answers with the client's source address, so a test can assert *who* the far end saw, not merely that a request succeeded. `DynamicUser`. |
+| `fixtures.httpEcho` | `{ name ? "http-echo", port ? 8080, listen ? "0.0.0.0" } -> module` -- answers with the client's source address, so a test can assert who the far end saw, not merely that a request succeeded. `DynamicUser`. |
 | `fixtures.forwardCounter` | `{ name ? "topo_fwd", family ? "inet", priority ? -300, match ? "" } -> module` -- plus `<name>-count` / `<name>-reset` on `PATH`. |
 
 ## Running the worked example
@@ -330,8 +330,8 @@ Nine subtests, 36.6 s of test script on top of VM boot:
 4. guest and destination are on different subnets (`ip route get` must say `via`)
 5. allowed traffic transits the FORWARD hook and is NATed (origin sees the
    router's uplink address; counter > 0)
-6. blocked traffic is dropped **at** the forward hook, not merely absent
-   (request fails **and** counter > 0)
+6. blocked traffic is dropped at the forward hook, not merely absent
+   (request fails and counter > 0)
 7. per-leg host aliases resolve
 8. stub secret landed at the real provider's default path
 9. consumer cannot start before the seeder

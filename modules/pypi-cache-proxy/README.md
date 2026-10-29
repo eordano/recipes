@@ -11,7 +11,7 @@ PyPI over and over. That wastes bandwidth, and worse: when `pypi.org` has an
 outage (or your uplink flaps), every `pip install` fails, even for packages you
 already fetched a hundred times.
 
-A single caching layer usually solves the bandwidth problem but *not* the
+A single caching layer usually solves the bandwidth problem but not the
 outage problem -- most caches happily return an error or expire an entry the
 moment the upstream is down.
 
@@ -22,10 +22,10 @@ pip -> nginx (disk cache, TLS)  ->  proxpi (Flask/gunicorn, localhost)  ->  PyPI
        + outage resilience          + index proxy + its own package cache
 ```
 
-1. **proxpi** -- [EpicWink/proxpi](https://github.com/EpicWink/proxpi), a small
+1. proxpi -- [EpicWink/proxpi](https://github.com/EpicWink/proxpi), a small
    Flask app run under gunicorn on `127.0.0.1`. It proxies the PyPI index and
    keeps its own package cache.
-2. **nginx** -- fronts proxpi with a much larger disk-backed `proxy_cache`,
+2. nginx -- fronts proxpi with a much larger disk-backed `proxy_cache`,
    terminates TLS, and is where the outage resilience actually lives.
 
 Either layer alone is insufficient -- the value is in what nginx adds on top.
@@ -42,7 +42,7 @@ proxy_cache_use_stale error timeout http_500 http_502 http_503 http_504 updating
 ```
 
 Only nginx runs this. It tells nginx: if the upstream errors, times out, or
-returns a 5xx -- **serve the stale cached copy anyway**. Combined with
+returns a 5xx -- serve the stale cached copy anyway. Combined with
 `proxy_cache_background_update on`, clients keep getting previously-seen
 packages while a refresh is attempted in the background. This is what turns
 "cache" into "keep working when PyPI is down."
@@ -61,10 +61,10 @@ freshness instead.
 
 ## Two other things worth knowing
 
-- **proxpi is built inline.** It is not in nixpkgs, so `default.nix` builds it
+- proxpi is built inline. It is not in nixpkgs, so `default.nix` builds it
   with `buildPythonPackage`. `pythonRelaxDeps = [ "lxml" ]` strips proxpi's
   exact lxml pin so the nixpkgs `lxml` satisfies it without a source rebuild.
-- **The proxpi cache is deliberately smaller than the nginx cache** (defaults:
+- The proxpi cache is deliberately smaller than the nginx cache (defaults:
   5 GiB inner, 10 GiB outer). The big, durable, outage-serving cache is the
   nginx one.
 
@@ -101,7 +101,7 @@ outage is the whole point.
 | Option | Default | Purpose |
 |---|---|---|
 | `enable` | `false` | Turn the service on. |
-| `domain` | `null` (**required**) | Virtual host nginx serves the cache on. |
+| `domain` | `null` (required) | Virtual host nginx serves the cache on. |
 | `acmeHost` | `null` | Existing ACME cert host to reuse for TLS. Null => no forced SSL (bring your own). |
 | `port` | `5000` | Localhost port for the inner proxpi/gunicorn. |
 | `user` / `group` | `pypi-cache` | System user/group the proxy runs as. |
@@ -114,9 +114,9 @@ outage is the whole point.
 
 ## Caveats
 
-- **nginx is enabled with `mkDefault`.** If you already manage nginx elsewhere,
+- nginx is enabled with `mkDefault`. If you already manage nginx elsewhere,
   the vhost merges in; make sure nothing else claims the same `domain`.
-- **`dataDir` should live on persistent storage** with enough room for
+- `dataDir` should live on persistent storage with enough room for
   `proxpiCacheSize`. On impermanence-style setups, point it at your persisted
   path.
 - The proxpi service is heavily sandboxed (`ProtectSystem = "strict"`,

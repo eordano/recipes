@@ -1,6 +1,6 @@
 # agenix-rules-autogen
 
-Stop hand-maintaining agenix's recipient list. **Derive** `secrets/rules.nix`
+Stop hand-maintaining agenix's recipient list. Derive `secrets/rules.nix`
 by scanning your flake, and gate drift with a CI freshness check.
 
 ## Problem
@@ -25,12 +25,12 @@ filesystem plus the host configs. So don't type it twice -- generate it.
 
 ## Key insight
 
-`rules.nix` is a **projection** of information you already have. This recipe
+`rules.nix` is a projection of information you already have. This recipe
 computes it from two sources and unions them:
 
-1. **On-disk truth** -- every `*.age` file physically present in your secrets
+1. On-disk truth -- every `*.age` file physically present in your secrets
    directory (`builtins.readDir`).
-2. **Config truth** -- every `age.secrets.<name>.rekeyFile` referenced by **any**
+2. Config truth -- every `age.secrets.<name>.rekeyFile` referenced by any
    host in `self.nixosConfigurations` / `self.darwinConfigurations`.
 
 The union is what makes the workflow ergonomic: **a host reference alone adds a
@@ -38,30 +38,30 @@ secret to the list, before its ciphertext exists.** That is deliberate -- it let
 a later "generate" or "encrypt" step create the file for a secret that is already
 declared and already scoped to the right recipients.
 
-The **recipients** are derived too, not typed: the generator reads the first
+The recipients are derived too, not typed: the generator reads the first
 host's `age.rekey.masterIdentities` (taking each key's `# Recipient:` comment
 line, else the first non-comment line that is itself a valid `age1...` /
-`ssh-*` **public recipient**) plus `age.rekey.extraEncryptionPubkeys`. Every
+`ssh-*` public recipient) plus `age.rekey.extraEncryptionPubkeys`. Every
 canonical secret is pinned to this same fleet-wide master set -- so losing one
 master key (e.g. a hardware token) costs convenience, not access: another master
 decrypts and you rekey onto a replacement.
 
-> **⚠️ Never point `masterIdentities` at a plaintext private key.** Each entry
-> is `readFile`d **at eval time** and the extracted string is written verbatim
+> ⚠️ Never point `masterIdentities` at a plaintext private key. Each entry
+> is `readFile`d at eval time and the extracted string is written verbatim
 > into the world-readable `/nix/store` copy of `rules.nix` (and into any binary
-> cache the closure is copied to). A bare path MUST be a **public**
+> cache the closure is copied to). A bare path MUST be a public
 > recipients/`.pub` file. If your master is a software age identity (a file that
-> contains `AGE-SECRET-KEY-...`), do **not** pass its path -- pass the
+> contains `AGE-SECRET-KEY-...`), do not pass its path -- pass the
 > `{ identity = <path>; pubkey = "age1..."; }` attrset form (the `pubkey` is
 > trusted as-is and the private file is never read), or point at the matching
-> `.pub` recipients file. The generator **fails closed**: if an identity file
+> `.pub` recipients file. The generator fails closed: if an identity file
 > contains `AGE-SECRET-KEY-...` or `AGE-PLUGIN-...` it throws instead of leaking the
 > key. YubiKey `.pub` files (with a `# Recipient:` line) are fine.
 
 ## The trap it closes
 
 Even a generator is worthless if people keep editing the output by hand and it
-silently diverges from reality. So **don't just generate -- enforce.** Add a CI
+silently diverges from reality. So don't just generate -- enforce. Add a CI
 check that regenerates the file and diffs it against the committed copy, failing
 the build on any difference with a message telling the contributor which command
 to run. Hand edits then survive only until the next check.
@@ -69,7 +69,7 @@ to run. Hand edits then survive only until the next check.
 ## Hard dependency
 
 This reads `config.age.rekey.*`, an option tree provided by
-[agenix-rekey](https://github.com/oddlama/agenix-rekey), **not** stock agenix.
+[agenix-rekey](https://github.com/oddlama/agenix-rekey), not stock agenix.
 You must import its overlay into the `pkgs` that build your host configurations
 so that `age.rekey.masterIdentities` and `age.rekey.extraEncryptionPubkeys`
 exist. This is a dependency, not a coupling you can strip -- the whole "derive the
@@ -125,28 +125,28 @@ checks.${system}.agenix-rules-fresh =
 
 ## Options
 
-| Argument           | Default                                               | Meaning |
-|--------------------|-------------------------------------------------------|---------|
+| Argument | Default | Meaning |
+|---|---|---|
 | `self`             | --                                                     | The flake `self`; source of `nixosConfigurations` / `darwinConfigurations`. |
-| `system`           | --                                                     | System double being evaluated; darwin hosts not matching it are skipped so identity files aren't cross-read. |
+| `system` | -- | System double being evaluated; darwin hosts not matching it are skipped so identity files aren't cross-read. |
 | `secretsDir`       | --                                                     | Path to the directory holding the canonical `*.age` files. |
 | `pathPrefix`       | `"secrets/"`                                          | Prefix each emitted entry carries and that `rekeyFile` paths are matched against. |
-| `excludedSubtrees` | `[ "secrets/generated/" "secrets/per-host/" ]`        | `rekeyFile` references under these prefixes are dropped -- they are agenix-rekey-managed derived trees (per-host re-encrypted copies, generator scratch), **not** source secrets. Set to match your own layout. |
+| `excludedSubtrees` | `[ "secrets/generated/" "secrets/per-host/" ]`        | `rekeyFile` references under these prefixes are dropped -- they are agenix-rekey-managed derived trees (per-host re-encrypted copies, generator scratch), not source secrets. Set to match your own layout. |
 
 ## Caveats
 
-- **The excluded subtrees are your convention, not a universal one.** The
+- The excluded subtrees are your convention, not a universal one. The
   defaults reflect a common agenix-rekey layout where per-host re-encrypted
   copies live under `secrets/per-host/` and generated material under
   `secrets/generated/`. If a `rekeyFile` in one of those trees leaks into the
   master rules list you will pin derived ciphertext to master keys -- override
   `excludedSubtrees` to whatever your tree uses.
-- **All secrets get the same recipient set** by design. This recipe is for the
-  *source* side (the masters that open canonical secrets). Per-host recipient
+- All secrets get the same recipient set by design. This recipe is for the
+  source side (the masters that open canonical secrets). Per-host recipient
   scoping is a separate concern handled by agenix-rekey.
-- **`rekeyFile` paths are normalised by regex** back to `<pathPrefix>....age`.
+- `rekeyFile` paths are normalised by regex back to `<pathPrefix>....age`.
   Keep your secrets under a single, consistently-named directory or the match
   will drop references it cannot normalise.
-- Reading `masterIdentities` from the *first* host assumes the master set is
+- Reading `masterIdentities` from the first host assumes the master set is
   uniform across hosts. That is the intended model here; if your hosts genuinely
   differ, this generator is the wrong tool.

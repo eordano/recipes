@@ -18,7 +18,7 @@ bind-mounted in.
 ## The key insight: same uid/gid on both sides
 
 The chain data is bind-mounted from the host (`dataDir`) into the container at
-`/data`. A bind mount shares the *inodes*, including their numeric owner -- there
+`/data`. A bind mount shares the inodes, including their numeric owner -- there
 is no uid translation. So the service user must be declared with the **same
 uid and gid on the host and inside the container**. If they differ, the files
 show up owned by the wrong user (or `nobody`) on one side, and bitcoind either
@@ -48,13 +48,13 @@ settings = mkOption {
 
 Each attribute of `settings` becomes a bitcoind command-line argument:
 
-- `bool` becomes `1`/`0`. **This is a trap**: bitcoind's own CLI parser does
+- `bool` becomes `1`/`0`. This is a trap: bitcoind's own CLI parser does
   not understand the words `true`/`false` as booleans at all -- passing
   `-blocksonly=true` is a silent no-op-turned-parse-surprise, not a boolean
   `true`. bitcoind's own convention is `1`/`0`, so this module converts for
   you: `settings.blocksonly = true;` renders as `-blocksonly=1`.
 - `int` and `str` are stringified as-is.
-- a **list** repeats the flag once per element -- this is bitcoind's own
+- a list repeats the flag once per element -- this is bitcoind's own
   convention for "list" arguments such as `-rpcallowip`, `-connect`,
   `-addnode`, `-whitelist`: `settings.whitelist = [ "10.0.0.0/24" "10.0.0.5" ];`
   renders as `-whitelist=10.0.0.0/24 -whitelist=10.0.0.5`.
@@ -77,16 +77,16 @@ of this module required.
 
 ### Precedence (explicit, and matches the code)
 
-Args are built in this order: **typed options -> `settings` -> `extraArgs`**.
-bitcoind's argument parser keeps the *last* occurrence of a scalar flag, so:
+Args are built in this order: typed options -> `settings` -> `extraArgs`.
+bitcoind's argument parser keeps the last occurrence of a scalar flag, so:
 
-1. A key in `settings` **overrides** the same key derived from a typed option
+1. A key in `settings` overrides the same key derived from a typed option
    (e.g. `settings.rpcport` wins over `rpc.port` if both are set -- don't do
    that, but if you do, `settings` wins).
-2. A key in `extraArgs` **overrides** the same key set via `settings` --
+2. A key in `extraArgs` overrides the same key set via `settings` --
    `extraArgs` is kept as the final, untyped escape hatch for backward
    compatibility and for flags that need no `=value` at all.
-3. List-style flags (`-rpcallowip`, `-whitelist`, ...) do **not** override
+3. List-style flags (`-rpcallowip`, `-whitelist`, ...) do not override
    this way; occurrences from different sources accumulate. Setting both
    `rpc.allowedIPs` and `settings.rpcallowip` adds both sets of addresses
    rather than one replacing the other.
@@ -103,12 +103,12 @@ flat list of `-key=value` CLI arguments (see `bitcoindArgs` in `default.nix`)
 and passed them straight to `ExecStart`. `settings` continues that: it is
 rendered into the same CLI-arg list, not into a config file. Two reasons:
 
-- **Zero behavior change.** Introducing a config file would mean adding
+- Zero behavior change. Introducing a config file would mean adding
   `-conf=/path` inside the container, deciding where that file lives relative
   to the `/data` bind mount, and reasoning about read order between a file and
   CLI args. Staying with pure CLI args keeps today's `ExecStart` line -- and
   every current consumer's resolved arguments -- byte-for-byte unchanged.
-- **`bitcoin.conf` has network-section semantics that CLI args do not.**
+- `bitcoin.conf` has network-section semantics that CLI args do not.
   A config file lets you scope a setting to `[main]`, `[test]`, or `[regtest]`
   so the same file behaves differently per network. A CLI flag has no such
   section -- it always applies regardless of which network `-mainnet`/
@@ -123,21 +123,21 @@ rendered into the same CLI-arg list, not into a config file. Two reasons:
 
 ## Traps this encodes
 
-- **Shutdown timeout.** On stop, bitcoind flushes its UTXO set (the
+- Shutdown timeout. On stop, bitcoind flushes its UTXO set (the
   `chainstate`) to disk. On a large node this takes minutes. If systemd
   `SIGKILL`s it first you can corrupt the chainstate and be forced into a long
   reindex. The service sets a long `TimeoutStopSec` (`stopTimeoutSec`, default
   300s). Do not shorten it casually.
 
-- **DNS.** `privateNetwork = true` gives the container a fresh network
+- DNS. `privateNetwork = true` gives the container a fresh network
   namespace with no inherited resolver. Its only route to the outside is the
   host side of the veth pair, so the container's single nameserver is set to
-  `containerNetwork.hostAddress`. That means the **host** must be able to
+  `containerNetwork.hostAddress`. That means the host must be able to
   resolve DNS on that address (a stub resolver like systemd-resolved, or a
   forwarder, listening there). If bitcoind can't resolve DNS seeds it won't find
   peers.
 
-- **W^X hardening.** The service runs with `MemoryDenyWriteExecute = true`. Any
+- W^X hardening. The service runs with `MemoryDenyWriteExecute = true`. Any
   `extraArgs` that loads a JIT plugin will fault. If you need one, relax the
   hardening.
 
@@ -201,5 +201,5 @@ rendered into the same CLI-arg list, not into a config file. Two reasons:
   a public address; `-rpcallowip` is not a substitute for network isolation.
 - The container `system.stateVersion` is pinned at `24.05`; bump it deliberately,
   not incidentally, since it governs stateful defaults inside the container.
-- This isolates the *network* and *filesystem*, not the kernel. nspawn shares the
+- This isolates the network and filesystem, not the kernel. nspawn shares the
   host kernel; it is not a hypervisor boundary.

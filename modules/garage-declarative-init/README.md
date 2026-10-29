@@ -3,7 +3,7 @@
 A NixOS module that wraps upstream `services.garage` so a
 [Garage](https://garagehq.deuxfleurs.fr) S3-compatible object store is **fully
 declared in Nix** -- cluster layout, buckets, and access keys -- and reconciled
-**idempotently on every boot**, instead of the imperative one-time CLI steps
+idempotently on every boot, instead of the imperative one-time CLI steps
 upstream leaves you with.
 
 ## The problem
@@ -21,10 +21,10 @@ reconciler, so the object store's shape is version-controlled and reproducible.
 
 ## What it does
 
-- **State-driven layout init.** A `garage-init` oneshot runs on every boot and
+- State-driven layout init. A `garage-init` oneshot runs on every boot and
   inspects `garage layout show`, then does the right thing:
   - fresh cluster (no roles), single-node -> assign this node a role and commit;
-  - fresh cluster (no roles), multi-node -> **do nothing** (see below);
+  - fresh cluster (no roles), multi-node -> do nothing (see below);
   - staged-but-uncommitted changes -> commit them;
   - existing cluster this node hasn't joined -> assign self and commit, unless
     `assignLayoutRole = false`;
@@ -33,36 +33,36 @@ reconciler, so the object store's shape is version-controlled and reproducible.
   applies are safe to re-run.
 
   The multi-node case is deliberately inert, and this is the third trap worth
-  stating outright: an empty layout does **not** mean the cluster is fresh. It
+  stating outright: an empty layout does not mean the cluster is fresh. It
   is also exactly what a cluster member sees before it has met its peers. A
-  node that self-assigns there forks a *second* single-node cluster carrying
+  node that self-assigns there forks a second single-node cluster carrying
   its own ID, and that fork can never be applied anyway, because one node
   cannot satisfy a replication factor above 1. Worse, the orphan role sticks
   around in the layout under a node ID nobody will ever see again. Bootstrapping
   a genuinely new multi-node cluster is a deliberate operator action, not
   something a boot-time reconciler should attempt.
-- **Declarative buckets** via `ensureBuckets` -- created if missing, skipped if
+- Declarative buckets via `ensureBuckets` -- created if missing, skipped if
   present.
-- **Declarative access keys** via `ensureAccess` -- access/secret key material is
+- Declarative access keys via `ensureAccess` -- access/secret key material is
   read from files (so it can come from your secret manager), imported by ID
   (existing keys are detected and not re-imported), and granted the requested
   permissions on a bucket.
-- **Public exposure** (optional) through nginx vhosts, not the firewall.
+- Public exposure (optional) through nginx vhosts, not the firewall.
 
 ## The traps this encodes
 
 Two ordering/identity gotchas are the real value here, both easy to get wrong:
 
-1. **`DynamicUser` must be forced off on a persistent data mount.** Upstream's
+1. `DynamicUser` must be forced off on a persistent data mount. Upstream's
    garage unit runs with `DynamicUser`, which allocates a *fresh uid per
    activation*. On a persistent data directory that means the next generation
    can no longer map the on-disk file ownership -- the daemon ends up unable to
    read its own state. This module sets `DynamicUser = lib.mkForce false` and
    pins a stable system user.
 
-2. **The daemon must wait for its data mount.** If `dataDir` sits on a
+2. The daemon must wait for its data mount. If `dataDir` sits on a
    late-mounted filesystem (ZFS dataset, NFS, LUKS), the daemon can start before
-   the mount is up, create/populate the directory on the *underlying* filesystem,
+   the mount is up, create/populate the directory on the underlying filesystem,
    and then get shadowed once the real mount appears. A `garage-setup-dirs`
    oneshot orders after the mount unit(s) you pass in `requiresMounts`, creates
    and chowns the dirs, and runs `before` the daemon. List your mount unit there
@@ -73,9 +73,9 @@ Metadata is placed in a `meta` sibling of `dataDir` and both are created with
 
 ## Exposure model
 
-Only the **RPC** and **admin** ports are ever opened on the firewall, and only
+Only the RPC and admin ports are ever opened on the firewall, and only
 on the interface you name in `trustedInterface` (e.g. a VPN/WireGuard/Tailscale
-interface). The **S3 API** and **web** ports are never firewalled open -- they
+interface). The S3 API and web ports are never firewalled open -- they
 reach the outside world solely through the nginx vhosts
 (`s3.garage.<domain>`, `*.web.garage.<domain>`), which require an ACME cert for
 `<domain>`. Set `exposeNginx = false` for an internal-only node (e.g. a
@@ -188,10 +188,10 @@ Success.
 | `requiresMounts` | `[ ]` | Systemd `.mount` units the dirs/daemon must wait for. |
 | `domain` | `example.com` | Base domain for the nginx vhosts (only if `exposeNginx`). |
 | `replicationFactor` | `1` | `> 1` enables multi-node mode. |
-| `nodeAddress` | `null` | This node's RPC address; **required** when multi-node. |
+| `nodeAddress` | `null` | This node's RPC address; required when multi-node. |
 | `bootstrapPeers` | `[ ]` | Peer nodes as `<node_id>@<host>:<port>` (multi-node). The id prefix is mandatory -- see above. |
 | `zone` | hostname | Garage layout zone for replica placement. |
-| `capacity` | `"1G"` | Capacity this node advertises to the layout. **Set this on every multi-node member** -- a zone's usable size is bounded by what its members advertise, so one node left at the default caps its whole zone at 1G. |
+| `capacity` | `"1G"` | Capacity this node advertises to the layout. Set this on every multi-node member -- a zone's usable size is bounded by what its members advertise, so one node left at the default caps its whole zone at 1G. |
 | `assignLayoutRole` | `true` | Whether this node may add itself to the layout at `capacity`. Set `false` for a member that should join and gossip but store no replicas. |
 | `rpcSecretFile` | -- | File with the shared 32-byte hex RPC secret. Same value on all nodes. |
 | `adminTokenFile` | -- | File with the admin API bearer token. |
@@ -205,11 +205,11 @@ Success.
 ## Caveats
 
 - The init script parses the text output of `garage layout show` / `garage
-  status`. It was developed against Garage **v2**; a different major version may
+  status`. It was developed against Garage v2; a different major version may
   change that output and break the parsing -- pin `package` accordingly.
 - `rpcSecretFile` / `adminTokenFile` / the per-key files must be readable by the
   configured user at the time the units run. If you use a secret manager whose
   units come up late, order `garage-init` after it.
-- The reconciler assigns/commits layout but does not *remove* buckets, keys, or
+- The reconciler assigns/commits layout but does not remove buckets, keys, or
   grants you delete from your config -- it converges toward "these exist", not a
   full teardown of anything else.

@@ -6,11 +6,11 @@ been safely copied first**.
 
 Each run does three things, in this order:
 
-1. **Organize** -- sort loose files in the archive's subdirectories into
+1. Organize -- sort loose files in the archive's subdirectories into
    `YYYY.MM` month folders, keyed on each file's modification time.
-2. **Sync** -- additively `rsync` the archive to a remote/backup directory. The
+2. Sync -- additively `rsync` the archive to a remote/backup directory. The
    remote is the durable side; nothing is deleted there.
-3. **Prune** -- delete local files older than *N* days to free space.
+3. Prune -- delete local files older than N days to free space.
 
 ## The trap this recipe encodes
 
@@ -28,19 +28,19 @@ sha256(local) == sha256(remote)  ->  rm local
 If a sync is interrupted, the remote is on a different filesystem that dropped
 the write, or a file changed between sync and prune, the hashes won't match and
 the local copy stays. Pruning can therefore never outrun a successful backup.
-This is why the sequence must be organize -> sync -> **verify** -> prune, and why
+This is why the sequence must be organize -> sync -> verify -> prune, and why
 prune must re-hash rather than trust the sync's exit status.
 
 ## The second trap: yt-dlp sidecars
 
 Tools like `yt-dlp` write a media file plus sidecars that share a filename stem
-but have **different mtimes** -- `video.mp4`, `video.info.json`,
+but have different mtimes -- `video.mp4`, `video.info.json`,
 `video.en.srt`, `video.webp`. Sorting each file independently by its own mtime
 scatters a video's metadata across different month folders.
 
 The `ytdlp` mode fixes this: it anchors each group on the `.info.json`, finds
 the group's media file (the largest same-stem member), and moves the **whole
-group** into the *media* file's month. The `.info.json` lands next to its
+group** into the media file's month. The `.info.json` lands next to its
 video. If the media is missing (download failed, json only), it falls back to
 the json's own date.
 
@@ -75,11 +75,11 @@ and `organize-yyyy-mm`) inline, so importing this one directory is enough.
 
 ## Options
 
-| Option          | Default                | Meaning                                                              |
-| --------------- | ---------------------- | ------------------------------------------------------------------- |
+| Option | Default | Meaning |
+|---|---|---|
 | `enable`        | `false`                | Turn the timer + oneshot on.                                        |
 | `user`          | `"archive"`            | User the oneshot runs as; set to the owner of `localPath`.          |
-| `localPath`     | `/var/lib/archive`     | Archive root; its **immediate subdirectories** are processed.       |
+| `localPath`     | `/var/lib/archive`     | Archive root; its immediate subdirectories are processed.       |
 | `remotePath`    | `/mnt/backup/archive`  | rsync destination (see caveat below).                               |
 | `retentionDays` | `14`                   | Prune local files older than this -- only if the remote copy hashes equal. |
 | `folders`       | `[ ]`                  | Per-subdirectory rules (`name` + `mode`).                           |
@@ -88,13 +88,13 @@ and `organize-yyyy-mm`) inline, so importing this one directory is enough.
 
 ### Modes
 
-| Mode         | Organize into `YYYY.MM` | Sync to remote | Verified prune |
-| ------------ | ----------------------- | -------------- | -------------- |
-| `organize`   | yes                     | yes            | yes            |
-| `ytdlp`      | yes (sidecars grouped)  | yes            | yes            |
-| `ytdlp-only` | yes (sidecars grouped)  | yes            | **no**         |
-| `sync-only`  | no                      | yes            | **no**         |
-| `sync-prune` | no                      | yes            | yes            |
+| Mode | Organize into `YYYY.MM` | Sync to remote | Verified prune |
+|---|---|---|---|
+| `organize` | yes | yes | yes |
+| `ytdlp` | yes (sidecars grouped) | yes | yes |
+| `ytdlp-only` | yes (sidecars grouped) | yes | no |
+| `sync-only` | no | yes | no |
+| `sync-prune` | no | yes | yes |
 
 Use `sync-only` (or `ytdlp-only`, which still sorts) for anything you never
 want auto-deleted locally (photo libraries, VM images, a media library the
@@ -111,15 +111,15 @@ an index, or a working file that lives at the directory root.
 
 ## Caveats
 
-- **`remotePath` is a plain filesystem path.** The verified-prune gate re-reads
+- `remotePath` is a plain filesystem path. The verified-prune gate re-reads
   and hashes the remote file, so the remote must be a locally reachable path.
   For an off-host backup, mount it first (NFS, sshfs, an rclone mount, a
   bind-mounted block device) and point `remotePath` at the mountpoint. If the
   mount is absent at run time, rsync recreates the directory locally and files
-  will *not* hash-match a real backup -- verify your mount is up (e.g. order the
+  will not hash-match a real backup -- verify your mount is up (e.g. order the
   service `after` the mount unit, or have the script bail if a sentinel file on
   the mount is missing).
-- **mtime is the sort key.** Files whose mtime doesn't reflect their real date
+- mtime is the sort key. Files whose mtime doesn't reflect their real date
   (restored-from-backup, `cp` without `-p`, unzipped archives) sort into the
   wrong month. Preserve timestamps when moving things into the archive.
 - Month folders already matching `YYYY.MM` are left alone, so re-runs are

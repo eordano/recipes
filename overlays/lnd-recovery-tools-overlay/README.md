@@ -1,16 +1,16 @@
 # lnd-recovery-tools-overlay
 
 A tiny, self-contained Nixpkgs overlay that packages two Lightning/Bitcoin
-operator CLIs that are **not in nixpkgs**, so you have them ready *before* the
+operator CLIs that are not in nixpkgs, so you have them ready before the
 day you need them -- which, for channel recovery, is always a bad day.
 
-- **`chantools`** -- [Lightning Labs' channel rescue toolkit][chantools]. The
+- `chantools` -- [Lightning Labs' channel rescue toolkit][chantools]. The
   last-resort kit for getting funds out of LND channels when the node itself
   won't cooperate: Static Channel Backup (SCB) recovery, force-close sweeps,
   key derivation, on-chain address sweeping, `channel.db` surgery.
-- **`bbolt-cli`** -- the [`bbolt`][bbolt] CLI from etcd-io. LND stores its channel
+- `bbolt-cli` -- the [`bbolt`][bbolt] CLI from etcd-io. LND stores its channel
   state in `channel.db`, a BoltDB / bbolt file. When that database is what's
-  wedged, you need to *look inside it* -- dump buckets, check pages, inspect
+  wedged, you need to look inside it -- dump buckets, check pages, inspect
   keys. This is that tool.
 
 ## The problem it solves
@@ -52,44 +52,49 @@ $ nix shell --impure --expr \
 
 ## Packaging notes / traps
 
-- **Two hashes per package.** Each derivation pins *both* the source `hash`
+- Two hashes per package. Each derivation pins both the source `hash`
   (the fetched Git tag tarball) and the `vendorHash` (the whole vendored Go
-  module tree). When you bump `version`, **both** change. A stale `vendorHash`
+  module tree). When you bump `version`, both change. A stale `vendorHash`
   does not silently reuse old deps -- it fails the build with a hash mismatch.
   The reliable loop: set the new version, set both hashes to `lib.fakeHash`,
   build once, copy the two `got:` hashes the error prints.
 
-- **`subPackages` picks the binary -- and getting it wrong builds *nothing*,
+- **`subPackages` picks the binary -- and getting it wrong builds nothing,
   silently.** Neither repo has its `main` at the module root: `chantools` keeps
-  it in `cmd/chantools`, and `bbolt`'s repo is primarily the *library* with its
+  it in `cmd/chantools`, and `bbolt`'s repo is primarily the library with its
   CLI in `cmd/bbolt`. Both therefore use `subPackages = [ "cmd/<name>" ]`. This
   overlay previously pointed `chantools` at `[ "." ]`; because the root
-  directory contains no Go files at all, the build **succeeded** and installed
+  directory contains no Go files at all, the build succeeded and installed
   an empty `$out` -- no `bin/`, no binary, `mainProgram` dangling. Nothing warns
   you. After changing `subPackages`, check the output actually has the binary
   (`ls $(nix build --no-link --print-out-paths ...)/bin`), don't just check that
   the build went green.
 
-- **Upstream tests may not pass in a clean checkout.** `chantools` ships
+- Upstream tests may not pass in a clean checkout. `chantools` ships
   `TestCompactDBAndDumpChannels`, which compares against a golden dump that no
   longer matches; it is skipped via `checkFlags`. The rest of the
   `cmd/chantools` suite runs and passes, so the skip stays narrow and anchored
   (`-skip=^...$`) rather than turning `doCheck` off wholesale.
+- The suite's brute-force tests (`TestClosePoolAccount`,
+  `TestSweepTimeLockManual`) are CPU-bound: on a builder busy with other jobs
+  the package's tests ran past `go test`'s default 10-minute timeout and the
+  build failed. `-timeout=30m` keeps every test running
+  without the deadline.
 
-- **`-X` version stamping does *not* work here -- verify before you add it.**
+- `-X` version stamping does not work here -- verify before you add it.
   An earlier revision of this overlay carried
   `-X github.com/lightningnetwork/chantools.Version=...` /
   `...Commit=...`. Those flags were dead weight, for two independent reasons, and
-  both are worth internalising because a bad `-X` **fails silently**: the Go
+  both are worth internalising because a bad `-X` fails silently: the Go
   linker just drops a flag whose target it cannot find, so the build stays
   green and you only notice when `--version` prints nothing useful.
 
-  1. **Wrong import path.** The fetched repo is `lightninglabs/chantools`, and
+  1. Wrong import path. The fetched repo is `lightninglabs/chantools`, and
      `go.mod` says `module github.com/lightninglabs/chantools` -- not
      `lightningnetwork`. `-X` takes `<importpath>.<symbol>`, so a typo'd org is
      a no-op. The module's `main` package is under `cmd/chantools` besides, not
      at the root.
-  2. **The symbols are `const`, not `var`.** `cmd/chantools/root.go` declares
+  2. The symbols are `const`, not `var`. `cmd/chantools/root.go` declares
      `version` and `Commit` inside a `const (...)` block. `-X` can only patch
      string *variables*; constants are baked in at compile time and are
      untouchable. Upstream's own `Makefile` has the same dead
@@ -100,7 +105,7 @@ $ nix shell --impure --expr \
   without any linker flags. Check `go.mod` and whether the target is a `var`
   before reaching for `-X` in any Go package.
 
-- **`bbolt-cli` is renamed to avoid a clash.** The package is `pname =
+- `bbolt-cli` is renamed to avoid a clash. The package is `pname =
   "bbolt-cli"` but the installed binary is `bbolt` (`mainProgram`). The `pkgs`
   attribute is `bbolt-cli` so it doesn't collide with any future library-only
   `bbolt` attribute that might land in nixpkgs.
@@ -109,9 +114,9 @@ $ nix shell --impure --expr \
 
 - Versions and hashes here are a point-in-time snapshot; bump them for your own
   deploy (see the two-hashes note above).
-- These are **operator / rescue** tools. `chantools` in particular manipulates
+- These are operator / rescue tools. `chantools` in particular manipulates
   keys and can broadcast on-chain transactions -- read its docs and work against
-  backups. `bbolt` can *write* to a database file; inspect read-only unless you
+  backups. `bbolt` can write to a database file; inspect read-only unless you
   mean it, and always on a copy.
 
 [chantools]: https://github.com/lightninglabs/chantools

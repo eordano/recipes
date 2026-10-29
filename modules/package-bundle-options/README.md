@@ -1,13 +1,13 @@
 # package-bundle-options
 
 Turn named package bundles into per-host `enable` toggles, where each bundle's
-human description *is* its `mkEnableOption` text -- plus a `linuxOnly` helper that
+human description is its `mkEnableOption` text -- plus a `linuxOnly` helper that
 silently drops Darwin-incompatible packages so one bundle set works across a
 mixed Linux/macOS fleet.
 
 ## The problem
 
-On a fleet of machines you want each host to opt into coherent *sets* of
+On a fleet of machines you want each host to opt into coherent sets of
 packages -- "the dev tools", "the sysadmin tools", "the desktop apps" -- not to
 maintain a hand-curated `environment.systemPackages` list per host. The naive
 approach duplicates package lists across hosts, or scatters `lib.optionals`
@@ -39,16 +39,16 @@ A host config becomes just a list of booleans:
 ### `linuxOnly` -- share one bundle across Linux and Darwin
 
 `linuxOnly ps` is the identity on Linux and `[]` on Darwin. Wrap the entries in
-a shared bundle that don't build (or don't make sense) on macOS, and the *same*
+a shared bundle that don't build (or don't make sense) on macOS, and the same
 bundle imports cleanly on every host -- the incompatible packages just vanish on
 Darwin instead of failing evaluation. Two representative reasons you reach for
 it:
 
-- **Archived / broken-on-Darwin tools.** e.g. `cargo-watch` is archived upstream
+- Archived / broken-on-Darwin tools. e.g. `cargo-watch` is archived upstream
   and won't build on `aarch64-darwin` under recent nixpkgs (Cocoa module-cache
   issues in the sandbox). Prefer a cross-platform equivalent like `bacon` in the
   shared part, and `linuxOnly`-gate the holdout.
-- **FUSE-linked tools.** `sshfs`'s Nix build links libfuse3 and can't drive
+- FUSE-linked tools. `sshfs`'s Nix build links libfuse3 and can't drive
   macOS FUSE; on Darwin you install a fuse-t-based sshfs out of band, so the
   Nix package is Linux-only.
 

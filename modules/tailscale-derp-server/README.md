@@ -20,41 +20,41 @@ proxy.
 
 The value here is the wiring, not the binary. Several things are non-obvious:
 
-- **`-certmode=manual` fed by symlinks.** derper's default cert mode wants to
+- `-certmode=manual` fed by symlinks. derper's default cert mode wants to
   run its own LetsEncrypt autocert. Instead we let NixOS's ACME manage the
   cert and hand derper the files. ACME and derper disagree on filenames, so an
   `ExecStartPre` symlinks `fullchain.pem`/`key.pem` to the `<hostname>.crt`/
   `.key` names derper expects.
 
-- **Nothing runs as root -- not even the setup step.** The obvious way to write
+- Nothing runs as root -- not even the setup step. The obvious way to write
   that `ExecStartPre` is with systemd's `+` prefix so it can `chown` freely.
   That is unnecessary: `StateDirectory=derper` already creates the state
   directory owned by the service user, and the certificate is reachable by
   joining the group that owns it. Dropping the prefix also makes the
-  readability check *real* -- as root, `test -r` always succeeds and has to be
+  readability check real -- as root, `test -r` always succeeds and has to be
   faked with `su`, which silently tests the wrong thing if the user's groups
   are wrong. Run as the service user and the check is the same access the
   daemon will perform a second later, so a group misconfiguration fails the
   unit immediately with a clear message rather than surfacing minutes later as
   a TLS handshake error.
 
-- **The owning group is derived, not assumed.** It is tempting to hardcode
+- The owning group is derived, not assumed. It is tempting to hardcode
   `nginx`, since a web server usually provisions the cert. But that group is a
-  property of the *certificate*, not of this module: it comes from
+  property of the certificate, not of this module: it comes from
   `security.acme.certs.<dir>.group`, whose NixOS default is `acme`. The module
   reads that value and joins whatever it actually is, and asserts at build time
   that it could determine it -- so a mismatch is a build error with a fix in the
   message, never a running relay that cannot read its own key.
 
-- **Poll for the cert.** The unit orders `after` the
+- Poll for the cert. The unit orders `after` the
   `acme-finished-<host>.target`, but the files can still lag that target. The
   `ExecStartPre` polls up to ~60s for them before symlinking -- without the
   loop, a race leaves derper starting with no cert.
 
-- **HTTP/2 must be OFF on the nginx vhost.** DERP negotiates over HTTP/1.1
+- HTTP/2 must be OFF on the nginx vhost. DERP negotiates over HTTP/1.1
   `Upgrade` semantics; leaving HTTP/2 on breaks the relay handshake.
 
-- **Only proxy the real DERP endpoints; 444 everything else.** The vhost
+- Only proxy the real DERP endpoints; 444 everything else. The vhost
   enumerates exactly `/derp` (websocket, with 10-minute timeouts),
   `/derp/probe`, `/derp/latency-check`, `/generate_204`, `/robots.txt`, and
   `/bootstrap-dns`. Any other path hits `location "/"`, gets logged to a
@@ -62,16 +62,16 @@ The value here is the wiring, not the binary. Several things are non-obvious:
   response). This keeps the box from looking like a live web server to
   internet scanners.
 
-- **Gate clients to your tailnet with `-verify-clients`.** Without it your
+- Gate clients to your tailnet with `-verify-clients`. Without it your
   relay is an open DERP anyone can bounce traffic through. With it, derper
   checks each client against the local Tailscale daemon (which must be
   running on the host).
 
-- **Split-port trap.** All the nginx and fail2ban machinery is gated on
-  `port != 443`. If you run derper *directly* on 443 (no reverse proxy), the
+- Split-port trap. All the nginx and fail2ban machinery is gated on
+  `port != 443`. If you run derper directly on 443 (no reverse proxy), the
   vhost and jails silently vanish -- that's intentional, but surprising.
 
-- **Backend SSL verify off + buffering off.** nginx talks to derper over
+- Backend SSL verify off + buffering off. nginx talks to derper over
   loopback HTTPS; `proxy_ssl_verify off` avoids validating the loopback cert,
   and buffering off keeps long-lived relay streams from stalling.
 
@@ -131,7 +131,7 @@ map (region with `HostName = "derp.example.com"`, `DERPPort = 443`,
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `enable` | `false` | Turn the module on. |
-| `hostname` | *(required)* | DERP hostname; **must** match the TLS cert. |
+| `hostname` | (required) | DERP hostname; must match the TLS cert. |
 | `port` | `8443` | derper's own HTTPS listener. `443` = run direct, no nginx. |
 | `stunPort` | `3478` | STUN port (opened on the firewall). |
 | `verifyClients` | `true` | Pass `-verify-clients`; restrict relay to your tailnet. |
@@ -147,10 +147,10 @@ map (region with `HostName = "derp.example.com"`, `DERPPort = 443`,
 When `fail2ban.enable` is set (and nginx is fronting derper), two jails are
 registered with matching `/etc/fail2ban/filter.d` filters:
 
-- **`derp-probes`** -- bans IPs that trip the nginx `444` responses (i.e. hit
+- `derp-probes` -- bans IPs that trip the nginx `444` responses (i.e. hit
   paths that aren't real DERP endpoints), read from
   `/var/log/nginx/derp-probes.log`.
-- **`derp-bad-tls`** -- bans IPs producing `cert mismatch` TLS handshake
+- `derp-bad-tls` -- bans IPs producing `cert mismatch` TLS handshake
   errors in the derper journal.
 
 Leave `fail2ban.action` at `null` to use fail2ban's global `banaction`, or set

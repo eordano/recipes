@@ -15,22 +15,22 @@ namespace for isolation.
 
 ## The key insight (and the trap)
 
-**Isolation comes from `runsc`, not from the network namespace.** Once gVisor is
+Isolation comes from `runsc`, not from the network namespace. Once gVisor is
 the security boundary, running the container with `--network=host` is fine -- and
-it is what lets the container reach a **loopback-only Redis** at `127.0.0.1`
+it is what lets the container reach a loopback-only Redis at `127.0.0.1`
 without exposing Redis to anything else. The runtime is registered as a named OCI
 runtime (`runsc-host` = `runsc --network=host`) and the container selects it with
 `--runtime=runsc-host`.
 
 Two traps this module handles for you:
 
-1. **Ownership must be pre-seeded.** systemd-tmpfiles creates every bind-mount
+1. Ownership must be pre-seeded. systemd-tmpfiles creates every bind-mount
    dir (`data`, `media`, `consume`, `export`) `0700` owned by `uid`/`gid`
-   **before** the container starts. The image's `USERMAP_UID`/`USERMAP_GID` then
-   run paperless as *that same id*. If the dirs don't exist with that owner on a
+   before the container starts. The image's `USERMAP_UID`/`USERMAP_GID` then
+   run paperless as that same id. If the dirs don't exist with that owner on a
    fresh `dataDir`, first-run writes fail with permission errors.
 
-2. **Public URL must match.** `PAPERLESS_URL` and `PAPERLESS_CSRF_TRUSTED_ORIGINS`
+2. Public URL must match. `PAPERLESS_URL` and `PAPERLESS_CSRF_TRUSTED_ORIGINS`
    are set to `https://<domain>`. Behind a reverse proxy, if these don't equal
    the URL the browser actually uses, login and CSRF break.
 
@@ -63,8 +63,8 @@ Ordering: when this module manages Redis, `podman-paperless` is set `after` /
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `enable` | `false` | Turn the service on. |
-| `domain` | `null` (**required**) | Public host; drives the vhost, `PAPERLESS_URL`, CSRF origins. |
-| `image` | `...paperless-ngx:latest` | Container image. **Unpinned by default -- see caveats.** |
+| `domain` | `null` (required) | Public host; drives the vhost, `PAPERLESS_URL`, CSRF origins. |
+| `image` | `...paperless-ngx:latest` | Container image. Unpinned by default -- see caveats. |
 | `dataDir` | `/var/lib/paperless` | Host state root (bind-mounted, survives image churn). |
 | `uid` / `gid` | `2800` | Id paperless runs as; bind-mount dirs are chowned to it. |
 | `port` | `2800` | Host port paperless listens on (real host port -- `--network=host`). |
@@ -78,23 +78,23 @@ Ordering: when this module manages Redis, `podman-paperless` is set `after` /
 
 ## Caveats
 
-- **`:latest` is unpinned.** The default image tag means a rebuild/redeploy
+- `:latest` is unpinned. The default image tag means a rebuild/redeploy
   silently pulls whatever ghcr currently publishes. Pin to a digest or version
   tag (`image = "...paperless-ngx@sha256:..."`) for reproducible deploys.
-- **`port` is a real host port.** Because of `--network=host`, `port` and
+- `port` is a real host port. Because of `--network=host`, `port` and
   `redisPort` occupy the host's port space directly -- make sure they're free and
   don't collide with other services.
-- **Cleartext app port / TLS bypass.** With `--network=host`, whatever the app
+- Cleartext app port / TLS bypass. With `--network=host`, whatever the app
   binds to is a real host bind. This module defaults `bindAddress` to `127.0.0.1`
   so paperless is reachable only through the nginx TLS front. If you set
   `bindAddress = "0.0.0.0"`, the plaintext login and document store are exposed
   on `port` on every interface, bypassing TLS/HSTS -- keep that port firewalled
   and never rely on the app's own auth over plaintext. Even on loopback, any
   lower-trust process on the same host can reach the app directly.
-- **gVisor overhead.** `runsc` adds syscall-interception overhead; OCR of large
+- gVisor overhead. `runsc` adds syscall-interception overhead; OCR of large
   batches will be somewhat slower than a native container. That's the cost of the
   sandbox.
-- **`uid`/`gid`/`port` sharing a number** in the example is just a convenience,
+- `uid`/`gid`/`port` sharing a number in the example is just a convenience,
   not a requirement -- pick any free values.
 - Requires `pkgs.gvisor` to be available and your kernel to permit `runsc`
   (it uses `ptrace`/KVM platform depending on host config).

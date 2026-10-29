@@ -2,7 +2,7 @@
 
 Keep a bearer token out of unprivileged sandboxes. Producers only drop JSON
 manifests into a shared, sticky spool directory; one small hardened watcher
-holds the credential and is the **sole** process that forwards those manifests
+holds the credential and is the sole process that forwards those manifests
 to an upstream REST API.
 
 ## The problem
@@ -31,11 +31,11 @@ unprivileged producers --drop <id>.json--▶  spool dir (1777, sticky)
                                           upstream REST API
 ```
 
-1. **Producers** write a manifest `<id>.json` into a **sticky 1777** spool
+1. Producers write a manifest `<id>.json` into a sticky 1777 spool
    directory and delete it when done. That is their entire interface. They hold
    no credential and make no network calls.
-2. **The broker** is one hardened systemd unit running as a dedicated user
-   whose only privilege is *read access to the token*. It watches the spool
+2. The broker is one hardened systemd unit running as a dedicated user
+   whose only privilege is read access to the token. It watches the spool
    with `inotify` and translates filesystem events into authenticated API
    calls:
    - a new/written `<id>.json` -> `POST <createPath>` with the manifest body
@@ -50,7 +50,7 @@ token lives in exactly one confined place.
 
 The broker reads `tokenFile` fresh for each API call, not once at startup. So
 when your secret manager rotates the token on disk, the very next forwarded
-manifest uses the new value -- **no restart, no reload**. This is the single
+manifest uses the new value -- no restart, no reload. This is the single
 most important detail; a naive implementation that caches the token in a
 variable would silently start failing after every rotation.
 
@@ -72,7 +72,7 @@ so the directory exists before it starts.
 ### The delete id comes from the filename, not the file
 
 On delete the manifest content is already gone, so the resource id is recovered
-from the filename stem (`<id>.json` -> `<id>`). Producers **must** name the file
+from the filename stem (`<id>.json` -> `<id>`). Producers must name the file
 after the same id they put in the `idField` of the JSON, or teardown will
 target the wrong resource. Create and delete are deliberately keyed the same
 way.
@@ -86,7 +86,7 @@ upstream `POST` handler should be idempotent for an id that already exists.
 
 ### inotify events cover both write styles
 
-It listens for `close_write` **and** `moved_to`: `close_write` catches
+It listens for `close_write` and `moved_to`: `close_write` catches
 producers that write in place, `moved_to` catches the safer write-to-temp-then-
 `rename(2)` pattern (which never exposes a half-written manifest). `delete` and
 `moved_from` both trigger teardown. Dotfiles and non-`.json` names are ignored.
@@ -99,7 +99,7 @@ The unit runs with `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`,
 system, so it should be able to touch nothing else. Run it as a dedicated
 low-privilege user.
 
-The bearer token is **never** placed on curl's command line. Process arguments
+The bearer token is never placed on curl's command line. Process arguments
 are readable via `/proc/<pid>/cmdline` by every local user on a stock host, so a
 token passed as `-H "Authorization: Bearer ..."` would be scrapable by the very
 unprivileged producers this module is meant to confine. Instead the
@@ -150,16 +150,16 @@ and unregisters by removing `job-42.json`.
 
 ## Options
 
-| Option        | Default                       | Meaning                                             |
-| ------------- | ----------------------------- | --------------------------------------------------- |
+| Option | Default | Meaning |
+|---|---|---|
 | `enable`      | `false`                       | Turn the broker on.                                 |
 | `spoolDir`    | `/var/lib/spool-broker/inbox` | Sticky dir producers drop manifests into (create it yourself). |
-| `tokenFile`   | *(required)*                  | File holding the bearer token; readable only by `user`. |
-| `upstreamUrl` | *(required)*                  | Base URL of the upstream REST API.                  |
+| `tokenFile`   | (required)                  | File holding the bearer token; readable only by `user`. |
+| `upstreamUrl` | (required) | Base URL of the upstream REST API. |
 | `createPath`  | `/api/sessions`               | Path POSTed to with the manifest body on create.    |
 | `deletePath`  | `/api/sessions`               | Base path DELETEd as `<deletePath>/<id>` on remove. |
 | `idField`     | `slug`                        | JSON field carrying the id (also the filename stem).|
-| `user`        | *(required)*                  | Dedicated user the broker runs as.                  |
+| `user` | (required) | Dedicated user the broker runs as. |
 | `group`       | `= user`                      | Group the broker runs as.                           |
 
 ## Caveats
@@ -173,6 +173,6 @@ and unregisters by removing `job-42.json`.
   logged and dropped until the next inotify event or restart. If you need
   at-least-once delivery, add a retry/spool-of-failures on top.
 - Producers can spoof each other's ids (they share the dir). The sticky bit
-  stops them deleting each other's *files*, but not writing a manifest claiming
+  stops them deleting each other's files, but not writing a manifest claiming
   someone else's id. Trust boundary is "local processes"; if that's too broad,
   give each producer its own drop dir.

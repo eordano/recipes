@@ -1,7 +1,7 @@
 # egress-filter
 
 Confine a network interface -- a VM bridge, a container network -- so the guests
-behind it can reach **only a named allowlist of domains**, and nothing else on
+behind it can reach only a named allowlist of domains, and nothing else on
 the internet.
 
 ## The problem
@@ -17,7 +17,7 @@ or leaks.
 
 A FORWARD chain per interface accepts established/related traffic, allows DNS
 (see below), passes through the private/local ranges you list, accepts anything
-whose destination is in an **ipset**, and drops the rest. The whole design is
+whose destination is in an ipset, and drops the rest. The whole design is
 about keeping that ipset correct. Two modes populate it:
 
 ### `resolve` mode (simple)
@@ -26,24 +26,24 @@ A systemd timer re-resolves every domain (A, AAAA, and one level of CNAME)
 through your chosen upstream resolver every `updateInterval` (default 5m) and
 rebuilds the ipset.
 
-- **Trap it handles:** the ipset is rebuilt in a **temporary set** and then
+- Trap it handles: the ipset is rebuilt in a temporary set and then
   `ipset swap`ped atomically into the name the FORWARD chain matches on. The
   live chain never sees a half-built allowlist -- no window where valid
   destinations are briefly missing.
-- **Limitation:** it is blind to IP rotations that happen *between* polls. If a
+- Limitation: it is blind to IP rotations that happen between polls. If a
   CDN hands the guest a fresh IP that the box hasn't resolved yet, that
   connection is dropped until the next refresh.
 
 ### `dnsmasq` mode (robust)
 
-A per-interface `dnsmasq` becomes the guests' **only** resolver. Its
+A per-interface `dnsmasq` becomes the guests' only resolver. Its
 `ipset=/domain/setname` directive writes each freshly-answered IP into the ipset
-**the instant it resolves** -- so the guest gets exactly the IP that is now
+the instant it resolves -- so the guest gets exactly the IP that is now
 allowed, with no polling gap.
 
-- **Trap it handles:** a guest could bypass interception by ignoring the offered
+- Trap it handles: a guest could bypass interception by ignoring the offered
   resolver and querying `8.8.8.8` directly. So port 53 (UDP and TCP) from the
-  interface is **DNATed to the local dnsmasq**, and IPv6 DNS from the interface
+  interface is DNATed to the local dnsmasq, and IPv6 DNS from the interface
   is dropped outright. The guest cannot resolve names except through the
   interceptor, which means every name it can resolve is a name whose IP just
   entered the allowlist.
@@ -94,9 +94,9 @@ Static IP/CIDR overrides and private-network passthrough work in both modes.
 | `allowPrivateNetworks` | `true` | Pass through the `privateNetworksV4/V6` ranges. |
 | `privateNetworksV4` | loopback + RFC1918 + link-local | Ranges treated as private. |
 | `privateNetworksV6` | loopback + link-local + ULA | Ranges treated as private. |
-| `allowDNS` | `true` | Allow port 53 to any destination (ignored when `mode = "dnsmasq"` *and* `dnsmasq.redirectDNS` is on -- that combination restricts DNS to the local interceptor instead). |
+| `allowDNS` | `true` | Allow port 53 to any destination (ignored when `mode = "dnsmasq"` and `dnsmasq.redirectDNS` is on -- that combination restricts DNS to the local interceptor instead). |
 | `dnsServers` | `["1.1.1.1" "8.8.8.8"]` | Upstream resolvers. |
-| `dnsmasq.listenAddress` | `""` | Gateway IP dnsmasq binds to (the bridge address). **Required in dnsmasq mode** -- an empty value produces a broken config. |
+| `dnsmasq.listenAddress` | `""` | Gateway IP dnsmasq binds to (the bridge address). Required in dnsmasq mode -- an empty value produces a broken config. |
 | `dnsmasq.port` | `53` | Interceptor port. |
 | `dnsmasq.redirectDNS` | `true` | DNAT the interface's port 53 to the interceptor. |
 | `dnsmasq.cacheSize` | `1000` | dnsmasq DNS cache size. |
@@ -106,24 +106,24 @@ Top-level: `services.egressFilter.enable`, `.updateInterval`, `.interfaces`.
 
 ## Caveats
 
-- **Match by destination is coarse.** A shared IP (many domains behind one
+- Match by destination is coarse. A shared IP (many domains behind one
   anycast address, or a big cloud front-end) means allowing one domain can
   incidentally allow siblings on the same IP. This is an inherent limit of
   IP-level filtering, not a bug.
-- **`resolve` mode has a polling gap.** Prefer `dnsmasq` mode when the allowed
+- `resolve` mode has a polling gap. Prefer `dnsmasq` mode when the allowed
   domains sit behind fast-rotating or huge IP pools.
-- **`dnsmasq` mode owns DNS for the interface.** Set `dnsmasq.listenAddress` to
+- `dnsmasq` mode owns DNS for the interface. Set `dnsmasq.listenAddress` to
   the interface's gateway IP and make sure guests are handed that resolver.
 - **`allowPrivateNetworks` defaults to `true` and bypasses the domain
-  allowlist.** Out of the box every guest can reach the *entire* configured
+  allowlist.** Out of the box every guest can reach the entire configured
   private range (all of `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`,
   link-local) -- i.e. your whole LAN, the host's internal/admin services, the
   router, and other machines -- no matter what `domains` says. The filter does
-  **not** stop internal lateral movement in this configuration. When confining
+  not stop internal lateral movement in this configuration. When confining
   an untrusted guest, set `allowPrivateNetworks = false`, or narrow
   `privateNetworksV4`/`privateNetworksV6` to just the bridge subnet and gateway
   it actually needs.
-- **RFC6598 shared address space (the CGNAT range) is *not* in the private
+- **RFC6598 shared address space (the CGNAT range) is not in the private
   defaults.** If your guests must reach a CGNAT or overlay-VPN range in that
   block, add it explicitly to `privateNetworksV4`.
 - The module forces `networking.firewall.enable = true` and installs its rules
@@ -132,7 +132,7 @@ Top-level: `services.egressFilter.enable`, `.updateInterval`, `.interfaces`.
 
 ## nftables backend
 
-**Supported**, via a native translation -- not the
+Supported, via a native translation -- not the
 `networking.firewall.extraCommands`/`extraStopCommands` path the iptables
 backend uses (nixpkgs' nftables firewall, `firewall-nftables.nix`, hard-
 asserts both of those `== ""`). On `networking.firewall.backend ==
@@ -145,7 +145,7 @@ equivalent; there is no remaining assertion blocking this backend.
 
 ### The two enabling primitives
 
-1. **dnsmasq populates an nftables set directly.** The pinned dnsmasq
+1. dnsmasq populates an nftables set directly. The pinned dnsmasq
    (2.93, built with `HAVE_NFTSET`) accepts
    `--nftset=/<domain>/<sel>#<family>#<table>#<set>`, where `<sel>` is `4`
    or `6` (which record type feeds that spec) and `<family>` is nft's own
@@ -154,7 +154,7 @@ equivalent; there is no remaining assertion blocking this backend.
    source (`nftset.c`, which -- after splitting the spec on `#` -- runs
    literally `add element <family> <table> <set> { <ip> }`, i.e. exactly
    the nft command this module's own table expects).
-2. **`nft -f <file>` applies as one atomic netlink transaction.** In
+2. `nft -f <file>` applies as one atomic netlink transaction. In
    `resolve` mode this replaces `ipset swap`: the timer writes a single
    file containing `flush set ...` followed by every `add element ...`
    for that refresh, and submits it in one `nft -f` call. The live
@@ -172,16 +172,16 @@ interceptor. `networking.nftables.tables` deletes and fully recreates every
 table it declares on each `nftables.service` reload (see the
 `fail2ban-ipset-geoip-cloudflare` recipe's README for the same finding),
 which would wipe that state and reopen the exact polling/interception gap
-this module exists to close. So the table is kept **outside**
+this module exists to close. So the table is kept outside
 `networking.nftables.tables`, split into two halves with different update
 rules:
 
-- **Table + per-interface sets** (`egress_allow_<iface>` /
+- Table + per-interface sets (`egress_allow_<iface>` /
   `egress_allow6_<iface>`): created idempotently (`nft add table`/
   `add set`, which -- unlike `nft create` -- is a no-op if it already
-  exists) and **never flushed** by setup or teardown. This is what
+  exists) and never flushed by setup or teardown. This is what
   survives a redeploy or a `nftables.service` reload.
-- **Enforcement chains** (the per-interface `forward`-hook chain, the
+- Enforcement chains (the per-interface `forward`-hook chain, the
   shared `nat`-hook DNS-redirect chain, and their dispatcher chains): pure
   functions of static config, so they're deleted and rebuilt from scratch
   on every run of `egress-filter-nftables.service` -- the dispatcher chains
@@ -208,7 +208,7 @@ interface instead of two.
 
 ### Known residual gaps
 
-- **`networking.nftables.flushRuleset`** (defaulted on for hosts with
+- `networking.nftables.flushRuleset` (defaulted on for hosts with
   `system.stateVersion` older than 23.11, or explicitly via
   `networking.nftables.ruleset`/`rulesetFile`): every start or reload of
   `nftables.service` -- including ones triggered by unrelated firewall
@@ -219,14 +219,14 @@ interface instead of two.
   `config.warnings` entry when it detects this combination; consider
   `networking.nftables.flushRuleset = false` if nothing else on the host
   needs it.
-- **No table cleanup on full disable.** Disabling `services.egressFilter`
+- No table cleanup on full disable. Disabling `services.egressFilter`
   removes this module's systemd unit from the config entirely, so only
-  its *old* `ExecStop` (which deletes just the enforcement chains, by
+  its old `ExecStop` (which deletes just the enforcement chains, by
   design -- see above) ever runs. The table and its allow-sets are never
   deleted and linger in the kernel until an operator runs
   `nft delete table inet egress-filter` by hand. This is the same
   tradeoff `fail2ban-ipset-geoip-cloudflare` accepts for its banned-IP set.
-- **dnsmasq's live population only ever adds, never removes**, on both
+- dnsmasq's live population only ever adds, never removes, on both
   backends -- identical to the pre-existing ipset behavior, not a
   regression from this port.
 

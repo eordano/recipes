@@ -5,9 +5,9 @@ snapshot inside the initrd, and get the systemd ordering, the `neededForBoot`
 guard rail and the loud-failure behaviour that make the wipe an actual
 guarantee instead of a hope.
 
-The interesting part of this recipe is **not** rolling back `/`. Everyone gets
+The interesting part of this recipe is not rolling back `/`. Everyone gets
 that right, because there is exactly one obvious unit to order against. The
-interesting part is the **second** dataset -- usually `/home` -- where the
+interesting part is the second dataset -- usually `/home` -- where the
 obvious answer is wrong in a way that produces a machine which boots fine,
 looks right, passes every check you think to run, and quietly keeps state
 forever.
@@ -26,10 +26,10 @@ zfsWipeOnBoot = {
 
 "Erase your darlings" impermanence has two halves:
 
-1. **Put the state you want back somewhere durable.** That is
+1. Put the state you want back somewhere durable. That is
    `nix-community/impermanence`'s `environment.persistence.<root>` -- bind
    mounts from a persistent dataset onto an ephemeral root.
-2. **Destroy everything else on every boot.** That is a `zfs rollback` in the
+2. Destroy everything else on every boot. That is a `zfs rollback` in the
    initrd, before anything mounts the dataset.
 
 nixpkgs implements neither, and the impermanence flake implements only the
@@ -40,7 +40,7 @@ rolling anything back. So every impermanence host in the world carries a
 hand-written copy of the same twelve-line unit, and the copies differ in ways
 their authors did not intend.
 
-Half of them are also still written against **scripted stage 1**:
+Half of them are also still written against scripted stage 1:
 
 ```nix
 boot.initrd.postDeviceCommands = lib.mkAfter ''
@@ -50,17 +50,15 @@ boot.initrd.postDeviceCommands = lib.mkAfter ''
 
 That form has no ordering semantics whatsoever -- it is a shell fragment
 concatenated into one big script -- and under the systemd initrd it is a
-*removed* option: `nixos/modules/system/boot/systemd/initrd.nix` lists
+removed option: `nixos/modules/system/boot/systemd/initrd.nix` lists
 `postDeviceCommands` in its `obsoleteOpt` block with the message "systemd stage
 1 does not support `boot.initrd.postDeviceCommands`". A host that flips
 `boot.initrd.systemd.enable = true` and forgets to port its rollback does not
-get a warning about a *disabled* wipe; it gets an evaluation error, which is
-the good case. A host that ports it *incorrectly* gets no error at all.
+get a warning about a disabled wipe; it gets an evaluation error, which is
+the good case. A host that ports it incorrectly gets no error at all.
 
 This module handles the second half only. Pair it with the impermanence flake,
 or with plain bind mounts, for the first.
-
----
 
 ## Trap 1 -- the anchor must be `sysroot.mount`, even for `/home`
 
@@ -106,7 +104,7 @@ boot.initrd.systemd.services.initrd-parse-etc.environment.SYSTEMD_SYSROOT_FSTAB 
 
 `systemd-fstab-generator` turns each entry into a `/sysroot`-prefixed mount
 unit: `/` -> `sysroot.mount`, `/home` -> `sysroot-home.mount`, `/var/log` ->
-`sysroot-var-log.mount`. The two are **not** peers:
+`sysroot-var-log.mount`. The two are not peers:
 
 - `sysroot.mount` is pulled by `initrd-root-fs.target`.
 - everything else is pulled by `initrd-fs.target`, which is
@@ -117,7 +115,7 @@ unit: `/` -> `sysroot.mount`, `/home` -> `sysroot-home.mount`, `/var/log` ->
   automatically."* `sysroot-home.mount` is beneath `sysroot.mount`, so it
   gains `Requires=sysroot.mount` and `After=sysroot.mount` for free.
 
-So `sysroot.mount` is a **strictly earlier, strictly more certain** point in
+So `sysroot.mount` is a strictly earlier, strictly more certain point in
 the initrd timeline than any other `sysroot-*.mount`. Ordering the wipe before
 `sysroot.mount` transitively orders it before every one of them. That is the
 "ordering between the two mount units" that the anchor leans on, and it is why
@@ -144,7 +142,7 @@ default dependencies a service is `After=basic.target`, far too late) and one
 surviving constraint, `After=zfs-import-rpool.service`. Nothing orders it
 against the rest of the boot. Two things then happen, both quiet:
 
-1. It can run **after** stage 2 has already mounted `/home` -- and a mounted
+1. It can run after stage 2 has already mounted `/home` -- and a mounted
    dataset cannot be rolled back while anything holds it open:
    `cannot rollback 'rpool/local/home': mountpoint or dataset is busy`.
 2. More likely, it never runs at all. `initrd-cleanup.service` is literally
@@ -165,7 +163,7 @@ filesystem, and `/` is unconditionally in `utils.pathsNeededForBoot`
 (`nixos/lib/utils.nix`), so its mount unit is in the initrd regardless of what
 anyone writes in `fileSystems`.
 
-**This module emits both**, `sysroot.mount` first:
+This module emits both, `sysroot.mount` first:
 
 ```
 [Unit]
@@ -178,17 +176,15 @@ The dataset's own mount unit is redundant given the anchor. It is there so the
 next reader can see which mount this unit is protecting without deriving the
 escaped name in their head.
 
----
-
 ## Trap 2 -- `neededForBoot` is not a performance hint
 
-Because Trap 1 hinges on it, this module **sets** it rather than hoping:
+Because Trap 1 hinges on it, this module sets it rather than hoping:
 
 ```nix
 fileSystems.<mountPoint>.neededForBoot = true;   # enforceNeededForBoot, default true
 ```
 
-and then asserts on the *effective* value anyway, so a `mkForce` from a
+and then asserts on the effective value anyway, so a `mkForce` from a
 hardware module elsewhere is caught at eval:
 
 ```
@@ -203,7 +199,7 @@ The check is `utils.fsNeededForBoot`, i.e. `fs.neededForBoot || elem
 fs.mountPoint pathsNeededForBoot`, not the raw option -- so `/` never trips it
 spuriously.
 
-One shape defeats the *setting* while leaving the assertion intact, which is
+One shape defeats the setting while leaving the assertion intact, which is
 the correct trade: if a host writes the whole filesystem entry with `mkForce`,
 
 ```nix
@@ -225,8 +221,6 @@ Setting `neededForBoot` has a visible side effect worth knowing: nixpkgs adds
 (`nixos/modules/tasks/filesystems.nix`, the `config.options` `mkMerge`). If you
 diff a host's `fileSystems."/home".options` before and after adopting this
 module, that is the expected change.
-
----
 
 ## Trap 3 -- a failed wipe is a successful boot
 
@@ -260,14 +254,12 @@ state that was supposed to be discarded. Create it with:
   zfs snapshot rpool/local/home@blank
 ```
 
-**`failHard = false` on hosts you cannot reach.** `emergency.target` in the
+`failHard = false` on hosts you cannot reach. `emergency.target` in the
 initrd is a serial console prompt. If the host has neither
 `boot.initrd.systemd.emergencyAccess = true` nor initrd SSH (see
 [`remote-luks-unlock`](remote-luks-unlock.md)), a hard fail is a brick that
 needs someone with physical access. On such hosts prefer `failHard = false` and
 a boot-time alert, and accept that you must monitor for the failure yourself.
-
----
 
 ## Trap 4 -- `-r` silently eats every snapshot of that dataset, every boot
 
@@ -278,7 +270,7 @@ snapshot:
 cannot rollback to 'rpool/local/home@blank': more recent snapshots or bookmarks exist
 ```
 
-which means an unattended wipe **must** pass `-r` -- the moment any snapshot
+which means an unattended wipe must pass `-r` -- the moment any snapshot
 timer, replication job or `zfs-auto-snapshot` touches the dataset, a rollback
 without `-r` fails on every subsequent boot. So `recursive` defaults to `true`.
 
@@ -312,8 +304,6 @@ by hand:
 zfs get -r com.sun:auto-snapshot rpool/local
 ```
 
----
-
 ## Trap 5 -- the blank snapshot must predate the first boot, idempotently
 
 `@blank` has to exist before the wipe first runs, which means at install time,
@@ -327,7 +317,7 @@ which means a disko `postCreateHook`:
 };
 ```
 
-Write it **idempotently**. `postCreateHook` re-runs on any repeat of the create
+Write it idempotently. `postCreateHook` re-runs on any repeat of the create
 step, and a second `zfs snapshot` of an existing name fails the whole disko
 run:
 
@@ -338,14 +328,12 @@ postCreateHook = ''
 '';
 ```
 
-For a dataset added to an *existing* host there is no install step to hook, so
+For a dataset added to an existing host there is no install step to hook, so
 this module offers `onMissingSnapshot = "create"`: it snapshots the current
 contents under that name and continues, logging clearly that this boot kept its
 state. Use it for exactly one boot, then set it back to `"fail"` -- left on, it
 turns "the snapshot is missing" from a loud stop into an automatic
 re-baselining of whatever happened to be on disk.
-
----
 
 ## Trap 6 -- make sure nothing else mounts the dataset first
 
@@ -353,14 +341,14 @@ The wipe races anything that mounts the dataset outside the mount units you
 ordered against. Two upstream behaviours are on your side, and both are worth
 knowing so you do not accidentally opt out:
 
-- **Import does not mount.** The initrd import runs `zpool import -d ... -N ...`
+- Import does not mount. The initrd import runs `zpool import -d ... -N ...`
   (`nixos/modules/tasks/filesystems/zfs.nix`); `-N` is "import without
   mounting". Nothing in the pool is mounted by the import itself.
-- **The import unit is ordered before every one of the pool's mounts.** The
+- The import unit is ordered before every one of the pool's mounts. The
   same file computes `getPoolMounts` -- the `/sysroot`-prefixed, escaped mount
   unit name for each of that pool's `neededForBoot` filesystems -- and sets both
   `requiredBy` and `before` to it. That is why this module derives its
-  `After=zfs-import-<pool>.service` from the *dataset's own pool prefix* rather
+  `After=zfs-import-<pool>.service` from the dataset's own pool prefix rather
   than from an option you could get wrong.
 
 What can still bite you is stage 2. `zfs-mount.service` mounts datasets with a
@@ -380,8 +368,6 @@ mounted twice with the wipe applied to the copy nobody is using. This module
 warns when `fileSystems.<mountPoint>.device` is not the dataset it was told to
 roll back, which catches the most common form of that mistake.
 
----
-
 ## Trap 7 -- encryption changes the ordering, not the anchor
 
 With the pool inside LUKS, the import unit needs its own dependency on the
@@ -395,13 +381,11 @@ boot.initrd.systemd.services."zfs-import-rpool" = {
 };
 ```
 
-With ZFS **native** encryption the key load happens inside the import unit
+With ZFS native encryption the key load happens inside the import unit
 itself, so there is nothing extra to order -- see
 [`zfs-native-encryption-keys`](zfs-native-encryption-keys.md) for how the key
 gets into the initrd in the first place. Either way the per-dataset `after`
-option here is for units the *import* depends on, not for the wipe.
-
----
+option here is for units the import depends on, not for the wipe.
 
 ## Trap 8 -- what must be on the persistent dataset, or the wipe rotates it
 
@@ -412,7 +396,7 @@ explicitly. The two that hurt:
   (`/var/log/journal/<machine-id>/` becomes a new directory each boot, and the
   old ones are never read), systemd's `ConditionFirstBoot`, and anything keyed
   on it.
-- **SSH host keys** -- regenerated every boot, so every client gets a host-key
+- SSH host keys -- regenerated every boot, so every client gets a host-key
   mismatch on every reboot, and the fleet-wide muscle-memory response to that
   is to delete the `known_hosts` line, which is exactly the reflex a real
   man-in-the-middle needs you to have. Point them at the persistent dataset
@@ -424,11 +408,9 @@ renumber and file ownership on persisted data drifts) and `/var/lib/systemd`.
 For a wiped `/home` specifically, remember that per-user persistence
 bind-mounts into a home directory that the wipe just emptied. The user's home
 must be recreated (it is, by `systemd-tmpfiles` / `users.users.<n>.home`) with
-the right ownership *before* the bind mounts land, and anything not listed is
+the right ownership before the bind mounts land, and anything not listed is
 gone. The failure mode is not data loss you notice -- it is a login that
 silently resets a setting you changed three weeks ago.
-
----
 
 ## Usage
 
@@ -484,8 +466,6 @@ zfsWipeOnBoot.datasets.home = {
 };
 ```
 
----
-
 ## Options
 
 | Option | Default | Effect |
@@ -497,7 +477,7 @@ zfsWipeOnBoot.datasets.home = {
 | `zfsWipeOnBoot.enforceNeededForBoot` | `true` | Sets `fileSystems.<mountPoint>.neededForBoot = true`. See Trap 2. |
 | `zfsWipeOnBoot.datasets` | `{ }` | Attrset of entries, keyed by unit-name suffix. |
 | `...datasets.<n>.enable` | `true` | Turn one entry off without deleting it. |
-| `...datasets.<n>.dataset` | *required* | Full dataset name; its pool prefix picks the import unit. |
+| `...datasets.<n>.dataset` | required | Full dataset name; its pool prefix picks the import unit. |
 | `...datasets.<n>.snapshot` | `zfsWipeOnBoot.snapshot` | Snapshot name without the `@`. |
 | `...datasets.<n>.mountPoint` | `null` | Enables the `neededForBoot` guard rail and assertions. |
 | `...datasets.<n>.recursive` | `true` | `zfs rollback -r`. See Trap 4. |
@@ -521,17 +501,15 @@ Type=oneshot
 RemainAfterExit=true
 ```
 
----
-
 ## Verifying the wipe actually happens
 
 Do not trust "it booted". Three checks, in increasing strength:
 
-1. **The canary.** `touch ~/canary-do-not-persist`, reboot, look. Thirty
+1. The canary. `touch ~/canary-do-not-persist`, reboot, look. Thirty
    seconds, and it catches
    every failure mode in this document.
 
-2. **The unit ran, and ran early.** The initrd journal is flushed into the main
+2. The unit ran, and ran early. The initrd journal is flushed into the main
    journal at switch-root, so:
 
    ```sh
@@ -549,7 +527,7 @@ Do not trust "it booted". Three checks, in increasing strength:
    evidence is destroyed by the next reboot. Persist `/var/log` (or a journal
    directory) before you start debugging boot ordering.
 
-3. **The dataset is genuinely at the snapshot.** Right after boot:
+3. The dataset is genuinely at the snapshot. Right after boot:
 
    ```sh
    zfs get -H -o value written rpool/local/home     # bytes changed since @blank
@@ -561,8 +539,6 @@ Do not trust "it booted". Three checks, in increasing strength:
    snapshot listing should show `@blank` and, if Trap 4 applies to you,
    nothing else -- which is the point at which people discover they have been
    destroying their auto-snapshots.
-
----
 
 ## The test
 
@@ -585,21 +561,21 @@ It builds a real pool on a scratch disk, boots a specialisation whose root is
 one at `/persist`, writes a marker into each, reboots, and asserts:
 
 - the marker on the root dataset is gone;
-- the marker on the **second `neededForBoot` dataset** is gone, and the dataset
+- the marker on the second `neededForBoot` dataset is gone, and the dataset
   is empty -- this is the Trap 1 assertion, and it fails on its own when only
   that dataset's rollback is disabled while the machine still boots cleanly;
-- the marker on `/persist` **survives**, so the two above are not just "the
+- the marker on `/persist` survives, so the two above are not just "the
   disk came up blank";
 - inside the initrd, `zfs-wipe-state.service` is `Before=sysroot.mount
   sysroot-state.mount`, both wipes returned `success`, and each wipe's
   `ActiveEnterTimestampMonotonic` precedes its mount unit's
-  `InactiveExitTimestampMonotonic` -- the ordering as *observed at runtime*, not
+  `InactiveExitTimestampMonotonic` -- the ordering as observed at runtime, not
   merely as declared.
 
 Plus four eval-time assertions that need no VM: `enforceNeededForBoot` really
 sets it, the emitted unit really carries the `sysroot.mount` anchor and the
 pool import ordering, and the `neededForBoot` guard rail really fires (and
-fires *only* then).
+fires only then).
 
 Note the narrow-anchor case: if the module is changed to emit
 `Before=sysroot-state.mount` alone, every behavioural assertion above still
@@ -607,37 +583,35 @@ passes -- the machine wipes correctly and looks perfect. Only the recorded
 `Before=` catches it. That is Trap 1 reproduced in miniature, and it is why
 that assertion is in the test.
 
----
-
 ## Caveats
 
-- **This module does not create the blank snapshot.** By design: creating it
+- This module does not create the blank snapshot. By design: creating it
   from a module means creating it at some arbitrary later moment, from
   whatever state the dataset is in then. See Trap 5.
-- **It does not persist anything.** Pair it with
+- It does not persist anything. Pair it with
   `nix-community/impermanence`'s `environment.persistence` or your own bind
   mounts. Getting the wipe right and the persistence wrong is worse than not
   wiping.
-- **Systemd initrd only.** Asserted. Under scripted stage 1 there is no unit
+- Systemd initrd only. Asserted. Under scripted stage 1 there is no unit
   ordering to be correct about, and `boot.initrd.postDeviceCommands` is removed
   anyway.
-- **`mountPoint = null` is supported but weaker.** The dataset is still wiped,
+- `mountPoint = null` is supported but weaker. The dataset is still wiped,
   still anchored on `sysroot.mount`, but the `neededForBoot` guard rail and the
   device/dataset cross-check cannot run. Use it only for datasets that are not
   in `fileSystems` at all.
-- **Nested datasets are not recursive.** zfs-rollback(8): *"The `-rR` options do
+- Nested datasets are not recursive. zfs-rollback(8): *"The `-rR` options do
   not recursively destroy the child snapshots of a recursive snapshot. Only
   direct snapshots of the specified filesystem are destroyed."* Rolling back
   `rpool/local/home` does nothing to a child dataset such as
   `rpool/local/home/<someone>`. Declare each dataset you want wiped as its own
   entry.
-- **Btrfs needs a different implementation.** The equivalent (`btrfs subvolume
+- Btrfs needs a different implementation. The equivalent (`btrfs subvolume
   delete` + `snapshot` from a read-only blank, under the top-level `subvolid=5`
   mount) has the same ordering requirement and the same silent-failure shape,
   plus one extra: nested subvolumes created after the fact -- by
   `systemd-nspawn`, by container runtimes -- must be deleted first or the parent
   `delete` fails. This module is ZFS-only.
-- **Version bounds.** Written against nixpkgs `26.11` (`nixos/modules/tasks/
+- Version bounds. Written against nixpkgs `26.11` (`nixos/modules/tasks/
   filesystems.nix`, `.../filesystems/zfs.nix`, `.../system/boot/systemd/
   initrd.nix`), systemd 261, OpenZFS 2.4. The unit-name derivation mirrors
   `getPoolMounts`; if upstream changes how initrd mount units are named, that

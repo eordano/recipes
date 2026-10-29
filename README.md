@@ -1,6 +1,6 @@
 # recipes
 
-Reusable, self-contained NixOS/Nix recipes. Each recipe is a directory with the Nix code + a README explaining the *why* and
+Reusable, self-contained NixOS/Nix recipes. Each recipe is a directory with the Nix code + a README explaining the why and
 the traps.
 
 ## Documentation site
@@ -19,8 +19,8 @@ pip install -r tools/requirements.txt
 python3 tools/gen_site.py && mkdocs serve
 ```
 
-Then open http://127.0.0.1:8000/recipes/. The generated `site-src/` and built
-`site/` are reproducible from the recipes -- regenerate rather than editing by hand.
+Then open http://127.0.0.1:8000/recipes/. The generated `site-src/` and `mkdocs.yml`
+and the built `site/` are reproducible from the recipes -- regenerate rather than editing by hand.
 
 ## License
 

@@ -1,7 +1,7 @@
 # vector-log-metrics-forward
 
 Centralized log + metric shipping with [Vector](https://vector.dev), where the
-local `journald` is only a **short-retention buffer** and the durable copy lives
+local `journald` is only a short-retention buffer and the durable copy lives
 on one or more upstream collectors. A single NixOS module.
 
 ## The problem
@@ -17,7 +17,7 @@ This module:
   inbound socket from other nodes) and forwards it to your collector(s).
 - Trims `journald` down to a small buffer, because the authoritative copy is
   upstream.
-- Fans out to **multiple upstreams in parallel**, each behind its own disk
+- Fans out to multiple upstreams in parallel, each behind its own disk
   buffer, so whichever sink is reachable first carries the data and a wedged
   sink can't stall the others.
 
@@ -33,32 +33,39 @@ copy is upstream, so local journald only needs to hold enough to survive a short
 upstream outage. Keeping it small also stops a wedged upstream + full disk buffer
 from being compounded by an unbounded local journal.
 
-### 2. Parse nginx access logs **non-aborting** (`parse_regex`, not `parse_regex!`)
+### 2. Parse nginx access logs non-aborting (`parse_regex`, not `parse_regex!`)
 
 This is the sharpest trap. TLS probers that connect to a plaintext `:80` cause
 nginx to log the raw ClientHello bytes as the "request". Those bytes contain a
-literal `"`, which terminates the `[^"]+` capture early and **fails the regex**.
+literal `"`, which terminates the `[^"]+` capture early and fails the regex.
 
 With the aborting form (`parse_regex!`), every such line becomes a Vector
-`ERROR` and is **dropped** -- so you silently lose exactly the traffic you most
+`ERROR` and is dropped -- so you silently lose exactly the traffic you most
 want to see. The non-aborting form returns an error value you can branch on:
 on failure, forward the raw line tagged `nginx_access_raw` instead of dropping
 it.
 
 ```vrl
-parsed, err = parse_regex(.message, r'...')
+parsed, err = parse_regex(.message, r'... "(?P<vhost>[^"]+)"')
+.host = "<networking.hostName>"
 if err == null {
   . |= parsed
   .labels.source = "nginx_access"
+  .labels.vhost = .vhost
 } else {
   .labels.source = "nginx_access_raw"   # forward raw, don't drop
 }
 ```
 
+Name the `$host` capture `vhost`, never `host`: `. |= parsed` would overwrite
+the event's `host` (the machine) with the request's Host header, and the
+collector would count vhosts as hosts. Keep `.message` too: it is the record's
+`_msg` downstream.
+
 ### 3. Fan out to a list of upstreams in parallel
 
 `upstream` accepts a list. Each entry gets its own Vector sink and its own
-buffer, and events go to **all of them at once**. The motivating case: during a
+buffer, and events go to all of them at once. The motivating case: during a
 box's bring-up, a LAN relay is reachable immediately while a VPN/tailnet
 collector only becomes reachable a little later. Sending to both means the first
 one to answer carries the data, and the buffer holds the rest for the slower
@@ -74,7 +81,7 @@ ordering so that can't happen.
 ### 5. Drop known noise once, up front
 
 `dropUnitNoise` filters high-volume, zero-value journald lines (matched by
-`_SYSTEMD_UNIT` + a substring) **before** they fan out to every downstream
+`_SYSTEMD_UNIT` + a substring) before they fan out to every downstream
 transform, so you filter each spam line once rather than in every consumer.
 
 ## Usage
@@ -107,7 +114,7 @@ Import the module and enable it on a shipper:
 }
 ```
 
-On the **collector** host, turn on the receiver:
+On the collector host, turn on the receiver:
 
 ```nix
 {
@@ -130,7 +137,7 @@ On the **collector** host, turn on the receiver:
 
 `enableLogReceiver` opens an inbound Vector source on `logsPort` and merges it
 into `add_labels`, so received logs are re-labeled and forwarded like local ones.
-To make this host the **terminal** store instead of a relay, extend
+To make this host the terminal store instead of a relay, extend
 `services.vector.settings.sinks` with your own sink reading from `add_labels`
 (Loki, Elasticsearch, an object store, ...) and point `upstream` at a next hop you
 actually want (or a throwaway you don't mind -- the fan-out sinks are always
@@ -138,8 +145,8 @@ created).
 
 Two receiver caveats:
 
-- **Metrics are not received here.** `enableMetrics` on a receiver only scrapes
-  *this* host's local exporters. Forwarded metrics arrive on `metricsPort`, but
+- Metrics are not received here. `enableMetrics` on a receiver only scrapes
+  this host's local exporters. Forwarded metrics arrive on `metricsPort`, but
   this module binds no inbound source there -- add a second `type = "vector"`
   source on `metricsPort` yourself if you want to aggregate remote metrics.
 - The firewall opens `metricsPort` whenever `enableMetrics` is set on a receiver,
@@ -171,23 +178,24 @@ Two receiver caveats:
 | `journaldMaxRetentionSec` | `86400` | Local journald time cap. |
 | `vectorBufferType` | `"disk"` | `disk` (survives restarts) or `memory`. |
 | `vectorBufferMaxSize` | `1073741824` | Disk buffer cap, bytes. |
+| `extraForwardMetricsInputs` | `[]` | Your own metric components (added to `services.vector.settings`) to forward as they are, without `label_metrics`' tags. |
 
 ## Caveats
 
-- **Provide the GeoIP databases yourself.** This module reads
+- Provide the GeoIP databases yourself. This module reads
   `GeoLite2-City.mmdb` and `GeoLite2-ASN.mmdb` from `geoipDatabasePath`; it does
   not download or license them. Point `geoipUpdaterService` at whatever refreshes
   them.
-- **The metric exporters must exist.** `enableMetrics` scrapes
+- The metric exporters must exist. `enableMetrics` scrapes
   `services.prometheus.exporters.node` (enabled by this module), and optionally a
   postgres exporter, an NVIDIA GPU exporter, and `services.prometheus.exporters.nut`
   -- enable those separately where you want them.
-- **Don't expose the receiver on an untrusted network.** With no
+- Don't expose the receiver on an untrusted network. With no
   `receiverInterface` the ports open on all interfaces. Set it to a VPN/private
   interface, or firewall the ports yourself.
 - Requires `services.nginx` for the nginx sources and `services.fail2ban` for the
   fail2ban filter; both are guarded, so leaving them off just omits those inputs.
-- **It retargets Docker's log driver.** On a host with `virtualisation.docker`
+- It retargets Docker's log driver. On a host with `virtualisation.docker`
   enabled the module sets `logDriver = "journald"`, so container logs land in
   the journal and get shipped with everything else. If you deliberately run a
   different driver, override it after importing.

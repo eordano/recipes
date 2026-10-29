@@ -14,7 +14,7 @@ fleet of hosts to pull pre-built paths from that cache.
 To pull from a private binary cache, a client needs two things:
 
 1. the substituter URL (`https://cache.example.com`), and
-2. the cache's **public signing key** in `nix.settings.trusted-public-keys`.
+2. the cache's public signing key in `nix.settings.trusted-public-keys`.
 
 Nix clients run with `require-sigs = true` by default and will refuse NARs
 from a substituter unless each narinfo is signed by a key they trust. So the
@@ -22,7 +22,7 @@ public key has to be on the client.
 
 The URL is static config you can commit. The key file, however, usually
 arrives out-of-band -- decrypted by agenix / sops-nix, dropped by a
-provisioning step, or copied during bootstrap -- and **may not be present yet**
+provisioning step, or copied during bootstrap -- and may not be present yet
 on a freshly installed or not-yet-provisioned host.
 
 ## The trap
@@ -35,8 +35,8 @@ nix.settings.trusted-public-keys = [
 ];
 ```
 
-`builtins.readFile` runs at **evaluation** time. On any host where the key
-file isn't there yet, evaluation **aborts** -- you can't even build the system
+`builtins.readFile` runs at evaluation time. On any host where the key
+file isn't there yet, evaluation aborts -- you can't even build the system
 closure until the secret lands. That's backwards: the cache is an
 optimization; its absence should never block you from building the machine
 that's supposed to receive the key in the first place. It's a
@@ -81,10 +81,10 @@ certainly has, so the trusted-key string matches exactly.
 
 ### Options
 
-| Option    | Default                              | Meaning |
-|-----------|--------------------------------------|---------|
+| Option | Default | Meaning |
+|---|---|---|
 | `enable`  | `false`                              | Turn the module on. |
-| `domain`  | *(required)*                         | Cache host; becomes `https://<domain>` and the default key-file name. |
+| `domain`  | (required)                         | Cache host; becomes `https://<domain>` and the default key-file name. |
 | `keyFile` | `/run/secrets/<domain>-key.pub`      | Path to the public-key file (`<name>:<base64>`). `null` force-skips. Missing file = module is a no-op. |
 
 The `.pub` file holds one line as produced by:
@@ -99,19 +99,19 @@ Publish/ship `cache-pub-key.pem` (that's the `keyFile`); keep
 
 ## Caveats
 
-- **Evaluation-time path.** `pathExists` and `readFile` see the path *as the
+- Evaluation-time path. `pathExists` and `readFile` see the path *as the
   evaluator sees it*. `keyFile` must be readable during evaluation -- a
   checked-in `.pub`, or a secret already decrypted onto disk. A path that
   only appears at activation/runtime will read as "missing" and the cache
   will silently stay off. Provision the key before (or as part of) the same
   evaluation you expect to use it.
 
-- **Pure-eval / flakes.** Under `--pure-eval`, absolute paths outside the
+- Pure-eval / flakes. Under `--pure-eval`, absolute paths outside the
   flake may not be readable at eval time. If you build flakes purely, either
   keep the key file inside the flake source tree or accept that the guard
   reads as "missing" (which fails safe -- no cache, no error).
 
-- **Silent by design.** The whole point is that a missing key produces no
-  error. If you *expect* the cache and it isn't being used, check that the
+- Silent by design. The whole point is that a missing key produces no
+  error. If you expect the cache and it isn't being used, check that the
   key file actually exists at the evaluated path -- the failure mode is a
   quiet cache miss, not a loud one.

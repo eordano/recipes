@@ -9,15 +9,15 @@ When you have more than one or two machines pulling from the public binary
 cache, they all fetch the same NARs over the WAN, over and over. Put this proxy
 on one always-on box, point every machine's `substituters` at it, and:
 
-- **Bandwidth**: each derivation crosses the WAN once, then serves from local
+- Bandwidth: each derivation crosses the WAN once, then serves from local
   disk at LAN speed.
-- **Availability**: when the upstream cache is slow or unreachable, builds keep
+- Availability: when the upstream cache is slow or unreachable, builds keep
   working -- cached entries are served stale (`proxy_cache_use_stale updating`)
   instead of failing.
 
 It's a transparent pass-through: NARs are cached and re-served verbatim, so
 clients still verify them against the upstream's signing key. This proxy does
-**not** re-sign anything.
+not re-sign anything.
 
 ## Usage
 
@@ -39,7 +39,7 @@ nix.settings.substituters       = [ "https://cache.example.com" ];
 nix.settings.trusted-public-keys = [ "cache.nixos.org-1:6NCHdD..." ];
 ```
 
-Keep the **upstream's** public key -- the proxy hands NARs through unchanged.
+Keep the upstream's public key -- the proxy hands NARs through unchanged.
 
 ### Options
 
@@ -60,9 +60,9 @@ Keep the **upstream's** public key -- the proxy hands NARs through unchanged.
 
 ### 1. Static-first, proxy-fallback routing -- and pinning `/nix-cache-info`
 
-If `websiteDir` is set, `/` serves that directory from disk and only a **404**
+If `websiteDir` is set, `/` serves that directory from disk and only a 404
 falls through (`error_page 404 = @fallback`) to the upstream proxy. But
-`/nix-cache-info` is pinned to the proxy in **all** cases (`= /nix-cache-info`),
+`/nix-cache-info` is pinned to the proxy in all cases (`= /nix-cache-info`),
 so Nix clients always get a valid cache-info response even if the static
 directory happens to contain a same-named file. Get this wrong and clients
 silently treat the store as unusable.
@@ -76,14 +76,14 @@ out; `aio on` plus `output_buffers 12 512k` keep those large files streaming
 without stalling a worker. The result is that a full mirror pass doesn't
 demolish the box's page cache.
 
-### 3. Upstream in an nginx **variable**, not a literal `proxy_pass`
+### 3. Upstream in an nginx variable, not a literal `proxy_pass`
 
 The upstream host lives in `set $upstream_endpoint ...` and `proxy_pass` uses the
 variable. This forces nginx to re-resolve the host through `resolver` on every
 request. If you instead write the hostname literally in `proxy_pass`, nginx
-resolves it **once at startup** and freezes that IP until the next config
+resolves it once at startup and freezes that IP until the next config
 reload -- which breaks the moment a CDN-backed cache like `cache.nixos.org`
-rotates addresses. The cost: you **must** provide a working `resolver` (a local
+rotates addresses. The cost: you must provide a working `resolver` (a local
 stub resolver, or your LAN DNS). With the variable form and no resolver, nginx
 fails the request.
 
@@ -92,11 +92,11 @@ that decides whether the lock does anything at all:
 
 - `proxy_cache_lock on` -- only one request at a time populates a given cache
   entry.
-- `proxy_cache_lock_timeout` (option `cacheLockTimeout`, **default `60s`**) --
+- `proxy_cache_lock_timeout` (option `cacheLockTimeout`, default `60s`) --
   how long the other concurrent requests wait for that one. They are released
-  as soon as the entry lands in the cache. **At `0s` they do not wait at all**:
-  they are passed straight to the upstream and their responses are *not*
-  cached, so on a *cold* miss the lock collapses nothing. `60s` covers a
+  as soon as the entry lands in the cache. At `0s` they do not wait at all:
+  they are passed straight to the upstream and their responses are not
+  cached, so on a cold miss the lock collapses nothing. `60s` covers a
   typical NAR fill; if the fill is still running when it expires, the waiters
   fall through to the upstream uncached (i.e. `0s` behaviour, delayed). Set
   `cacheLockTimeout = "0s"` if you would rather never wait.
@@ -117,7 +117,7 @@ that decides whether the lock does anything at all:
 
 ## Security notes
 
-- **Upstream TLS is verified on the WAN fetch by default**
+- Upstream TLS is verified on the WAN fetch by default
   (`verifyUpstreamTls = true`): the proxy validates the upstream cache's
   certificate against the system CA bundle
   (`/etc/ssl/certs/ca-certificates.crt`), with SNI and the certificate name

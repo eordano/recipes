@@ -1,6 +1,6 @@
 # firewall-by-country
 
-A NixOS module that geo-filters inbound traffic by the **source IP's country**,
+A NixOS module that geo-filters inbound traffic by the source IP's country,
 using `ipset` hash tables and `iptables`/`ip6tables` (IPv4 + IPv6). Run it as a
 global allowlist/blocklist or per network interface.
 
@@ -17,19 +17,31 @@ Country matching is deceptively easy to get catastrophically wrong. The rule
 that makes it safe is the **ordering of RETURN rules before the country
 match**:
 
-- Match on **source IP only.** Never filter on destination -- return traffic
+- Match on source IP only. Never filter on destination -- return traffic
   and locally-originated flows have foreign destinations.
-- **RETURN on `ESTABLISHED,RELATED` first.** Otherwise reply packets of your own
+- RETURN on `ESTABLISHED,RELATED` first. Otherwise reply packets of your own
   outbound connections get judged by the country filter and dropped.
-- **RETURN on every private / loopback / link-local range** *and* on
-  **CGNAT `100.64.0.0/10`** (RFC 6598) before the country DROP. Many mesh/VPN
+- RETURN on every private / loopback / link-local range and on
+  CGNAT `100.64.0.0/10` (RFC 6598) before the country DROP. Many mesh/VPN
   overlays (Tailscale, for one) assign addresses inside the CGNAT block, so a
   country allowlist that skips it **silently locks out your own management
   network** -- you lose SSH to the box and only notice when it's already
   unreachable. Same idea for IPv6: RETURN on loopback, link-local, and
   unique-local (`fc00::/7`), plus your overlay's ULA prefix if it's outside that.
-- **Insert the chain at `INPUT` position 1** so it runs ahead of the rest of
+- Insert the chain at `INPUT` position 1 so it runs ahead of the rest of
   `networking.firewall`.
+- Ports a remote client must reach from anywhere (a VPN control plane and
+  its relays, typically TCP 443, UDP 3478 for STUN and UDP 41641 for
+  WireGuard) go in `exemptTCPPorts` / `exemptUDPPorts`: the chain RETURNs
+  them before the country match, and nixos-fw alone decides whether they are
+  open. Without this a client that travels outside the allowlist can never
+  come back through the VPN to reach the host.
+- Never ACCEPT in this chain. Until 2026-10-26 allowlist mode ACCEPTed on a
+  country match, and because the chain sits at `INPUT 1` that verdict was
+  final: every socket bound to `0.0.0.0` on a public host was reachable from
+  every allowlisted country, whatever `allowedTCPPorts` said (node-exporter,
+  a resolver bound to the public address, DERP's raw port). A geo filter is a
+  pre-filter; the port policy stays with nixos-fw.
 
 The module bakes all of this in. Do not remove any RETURN rule to "tidy up."
 
@@ -38,14 +50,17 @@ The module bakes all of this in. Do not remove any RETURN rule to "tidy up."
 1. For each configured country it builds two ipsets (`country_<cc>` for v4,
    `country6_<cc>` for v6) from prefix lists shipped by a package you provide.
 2. It creates a `COUNTRY_FILTER` chain that RETURNs established/local traffic,
-   then ACCEPTs (allowlist) or DROPs (blocklist) on the country ipsets, with a
-   default action for everything else.
+   then RETURNs (allowlist) or DROPs (blocklist) on the country ipsets, and
+   DROPs (allowlist) or RETURNs (blocklist) everything else. The chain only
+   ever says "not from here, drop" or "go on": it never ACCEPTs, so a packet
+   from an allowed country is still judged by `networking.firewall`'s own
+   allowlist afterwards.
 3. It inserts that chain at `INPUT` position 1, and tears it all down cleanly on
    firewall stop.
 
 ## Prefix lists (`geoipPackage`)
 
-There is **no upstream package** -- you supply one. Point `geoipPackage` at a
+There is no upstream package -- you supply one. Point `geoipPackage` at a
 derivation laying out:
 
 ```
@@ -101,11 +116,11 @@ services.firewallByCountry.interfaces = {
 
 ## Caveats
 
-- **GeoIP is approximate.** Prefix-to-country mapping drifts, and IPs get
+- GeoIP is approximate. Prefix-to-country mapping drifts, and IPs get
   reassigned. Never make it your only access control for something you can't
   afford to be locked out of -- keep an out-of-band path (console, a trusted
   `extraAllowedRanges` network).
-- **It filters `INPUT` only** (traffic to this host), not forwarded traffic.
+- It filters `INPUT` only (traffic to this host), not forwarded traffic.
 - Large countries mean large ipsets; the module sizes hash tables up to 65536
   elements per set, which covers aggregated national zones comfortably.
 - Requires the `ip_set_hash_net` and `xt_set` kernel modules (loaded
@@ -118,10 +133,10 @@ This module works on both `networking.firewall.backend = "iptables"` (the
 default, as described above) and `"nftables"`. nixpkgs' nftables firewall
 hard-asserts `networking.firewall.extraCommands`/`extraStopCommands == ""`,
 so the country ipsets and the `INPUT`-position-1 jump chains can't be driven
-through them there. Instead the nftables path builds its **own** nftables
+through them there. Instead the nftables path builds its own nftables
 table (family `inet`, name `firewall-by-country`), entirely outside
 `networking.nftables.tables` (which would delete-and-recreate it, and
-therefore the per-country sets, on every ruleset reload -- harmless *here*
+therefore the per-country sets, on every ruleset reload -- harmless here
 since those sets are always fully rebuilt from `geoipPackage` anyway, but
 kept consistent with how the other affected recipes in this collection
 handle nftables tables that do carry state worth protecting).
@@ -136,7 +151,7 @@ The translation preserves the load-bearing trap exactly:
 - `return` inside a jumped-to chain is nftables' equivalent of iptables'
   "`RETURN` to `INPUT`, fall through to the next `-j`": it resumes the
   dispatcher at the next `jump`, so established/related and bypass-range
-  traffic still gets a chance to hit a *later* scope (and, if nothing
+  traffic still gets a chance to hit a later scope (and, if nothing
   terminates, the normal firewall) instead of being silently swallowed.
 - The unconditional default-action rule at the end of each chain is a bare
   `accept`/`drop`, which -- like iptables `ACCEPT`/`DROP` -- is terminal
@@ -147,6 +162,6 @@ A `firewall-by-country-nftables` systemd unit (re)builds the whole table in
 one atomic `nft -f` transaction on every start, after first deleting it if
 present -- safe because, again, there's no accumulated state to lose, just
 per-country prefix lists derived fresh from `geoipPackage` every time. Prefix
-lists are still read from `geoipPackage` at **runtime**, not Nix eval time,
+lists are still read from `geoipPackage` at runtime, not Nix eval time,
 exactly like the iptables path -- referencing them in the generated shell
 script never forces an import-from-derivation build during evaluation.

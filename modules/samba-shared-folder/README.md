@@ -1,7 +1,7 @@
 # samba-shared-folder
 
 A single declarative Samba (SMB) share for a NixOS host -- with the one thing
-NixOS *can't* declare, SMB passwords, bridged in via a guarded oneshot service.
+NixOS can't declare, SMB passwords, bridged in via a guarded oneshot service.
 
 ## The problem
 
@@ -19,16 +19,16 @@ idempotently, on every activation.
 
 Reading the Nix won't tell you either of these:
 
-1. **SMB users must already exist as system users.** This module creates only
-   the *group*, never the accounts. The password-setup service silently skips
+1. SMB users must already exist as system users. This module creates only
+   the group, never the accounts. The password-setup service silently skips
    any `smbUser` with no matching `id`, so a missing system account does not
-   fail the build -- it surfaces later as an **authentication failure** at
+   fail the build -- it surfaces later as an authentication failure at
    connect time. Make sure every name in `smbUsers` also has a
    `users.users.<name>` somewhere in the host config.
 
-2. **Rotating the password file does not re-set a live password.** Idempotency
+2. Rotating the password file does not re-set a live password. Idempotency
    comes from a `pdbedit -L` guard: the oneshot only calls `smbpasswd -a` for
-   users *not already* in the passdb. This is deliberate -- it keeps activation
+   users not already in the passdb. This is deliberate -- it keeps activation
    from touching passwords on every rebuild -- but it means changing the
    contents of a `passwordFile` has no effect on an already-provisioned user.
    To actually change a live password, remove the user from the passdb first
@@ -73,7 +73,7 @@ from a client at `\\your-host\shared` (or `smb://your-host/shared`) as
 | `group` | `shared` | Owning POSIX group; files are `force group`ed to it so members see each other's writes. |
 | `workgroup` | `WORKGROUP` | SMB workgroup. |
 | `interfaces` | `[]` | Subnets/interfaces to bind to. Empty = all; when set, `bind interfaces only` is enabled. |
-| `openFirewall` | `false` | Opt-in: open SMB ports 445/139. Opens them on **all** interfaces regardless of `interfaces` -- see Security notes. |
+| `openFirewall` | `false` | Opt-in: open SMB ports 445/139. Opens them on all interfaces regardless of `interfaces` -- see Security notes. |
 | `smbUsers` | `{}` | Attrset of `<user>.passwordFile`. At least one is required. |
 
 The `passwordFile` should live outside the Nix store (an agenix/sops secret, or
@@ -81,10 +81,10 @@ a path under `/run`) -- anything in the store is world-readable.
 
 ## Security notes
 
-- **The firewall stays closed by default.** `openFirewall = false` means the
+- The firewall stays closed by default. `openFirewall = false` means the
   share is unreachable from other machines until you open 445/139 yourself.
-- **`openFirewall = true` opens 445/139 on every interface.** It maps to
-  NixOS's `services.samba.openFirewall`, which is *not* scoped by the
+- `openFirewall = true` opens 445/139 on every interface. It maps to
+  NixOS's `services.samba.openFirewall`, which is not scoped by the
   `interfaces` option -- `interfaces` only controls the addresses smbd binds
   to, not the firewall. On a laptop that joins untrusted Wi-Fi, or any host
   with a public WAN interface, that exposes an authenticated SMB server to
@@ -95,12 +95,12 @@ a path under `/run`) -- anything in the store is world-readable.
 
 ## Design notes
 
-- **`nmbd` is disabled.** No NetBIOS name broadcast, so clients connect by
+- `nmbd` is disabled. No NetBIOS name broadcast, so clients connect by
   hostname or IP rather than by browsing the network neighborhood. One fewer
   service and one fewer open port.
-- **`map to guest = Bad User` with `guest ok = no`.** Unknown usernames are
+- `map to guest = Bad User` with `guest ok = no`. Unknown usernames are
   mapped to guest and then rejected by the share (guests aren't valid users).
-  The net effect is that a bogus username is denied *without* a password prompt
+  The net effect is that a bogus username is denied without a password prompt
   -- the mapping suppresses the prompt, the share still refuses access.
 - The setup service orders `after`/`wants` `samba-smbd.service`, so the passdb
   is populated once smbd is up, and `RemainAfterExit` keeps it "active" so it

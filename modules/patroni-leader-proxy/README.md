@@ -8,19 +8,19 @@ client reconfiguration, no DNS change, no restart.
 
 You run PostgreSQL in HA with [Patroni](https://patroni.readthedocs.io/). Patroni
 elects a leader and, on failure, promotes a replica -- but the leader is now a
-*different host*. Every write client has to find the new one. Chasing that with
+different host. Every write client has to find the new one. Chasing that with
 DNS TTLs, floating VIPs, or client-side multi-host connection strings is either
 slow, fiddly, or unsupported by your driver.
 
 ## The insight
 
-Patroni already exposes a REST API that answers, per node, *"am I the leader?"*:
+Patroni already exposes a REST API that answers, per node, "am I the leader?":
 
-- `GET /primary` -> **200 only on the current leader**, 503 otherwise
-- `GET /replica` -> **200 only on a running replica**
+- `GET /primary` -> 200 only on the current leader, 503 otherwise
+- `GET /replica` -> 200 only on a running replica
 
 So point HAProxy in TCP mode at the raw PostgreSQL port of every node, but use
-the **REST API as the health check**. The read-write pool then holds exactly one
+the REST API as the health check. The read-write pool then holds exactly one
 "healthy" server -- the leader -- and HAProxy re-points to a newly promoted leader
 within `inter x fall` seconds. Clients only ever talk to `127.0.0.1:<port>`; the
 proxy quietly follows the leader around the cluster.
@@ -62,7 +62,7 @@ set `readPort`, `127.0.0.1:5433` for reads (any live replica).
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `nodes` | *(required)* | `name -> address` of every Patroni member. |
+| `nodes` | (required) | `name -> address` of every Patroni member. |
 | `pgPort` | `5432` | PostgreSQL port on each node (forwarded to). |
 | `restApiPort` | `8008` | Patroni REST API port (health-checked). |
 | `port` | `5432` | Local read-write listen port. |
@@ -75,7 +75,7 @@ set `readPort`, `127.0.0.1:5433` for reads (any live replica).
 
 ### Servers start DOWN, on purpose
 
-HAProxy's default is to consider a health-checked server **UP** until a check
+HAProxy's default is to consider a health-checked server UP until a check
 proves otherwise. For a pool whose entire job is "only the leader", that default
 is backwards: for up to `checkInter x checkFall` after HAProxy starts -- 25
 seconds at the defaults here -- every node is in the RW pool, and a write can be
@@ -91,27 +91,27 @@ keyword and refuses to start, which is at least a loud failure rather than a
 quiet misroute.
 
 
-**WAN-tolerant timings.** If the proxy health-checks nodes across a high-latency
-link (a stretched cross-region cluster), a *healthy* `/primary` check can take
+WAN-tolerant timings. If the proxy health-checks nodes across a high-latency
+link (a stretched cross-region cluster), a healthy `/primary` check can take
 1-2s over a ~150ms RTT. A tight `inter 3s` / `timeout check 3s` flaps the whole
 pool DOWN on every jitter spike -- dropping all writes for no reason. The defaults
 here are `inter 5s fall 5 rise 2` (~25s to mark a node down) with
 `timeout check 8s`. Raise them further for slower links; do not lower them
 because the LAN case "looks fine".
 
-**Live connections survive blips.** HAProxy's `on-marked-down shutdown-sessions`
-is deliberately **not** set. On a transient health-check failure you want
+Live connections survive blips. HAProxy's `on-marked-down shutdown-sessions`
+is deliberately not set. On a transient health-check failure you want
 existing PostgreSQL connections to survive, not be killed and re-pooled. (The
 leader itself hasn't moved -- only a check timed out.)
 
-**Boot ordering when checks ride a VPN.** If the Patroni nodes are reachable only
+Boot ordering when checks ride a VPN. If the Patroni nodes are reachable only
 over an overlay network (Tailscale, WireGuard, ...), HAProxy starting before that
 interface is up trips every server to "No route to host" and leaves the RW pool
 empty for ~30s until checks recover. Pass the overlay's unit via
 `extraAfterUnits = [ "tailscaled.service" ];` (or your WireGuard unit).
 `network-online.target` is always ordered before HAProxy.
 
-**Log-noise suppression.** `option dontlog-normal` drops the clean-termination
+Log-noise suppression. `option dontlog-normal` drops the clean-termination
 line every PostgreSQL connection emits. On a busy host this is tens of thousands
 of lines per boot that otherwise drown the DOWN/UP/retry events you actually care
 about.
@@ -133,9 +133,9 @@ boot.kernel.sysctl."net.ipv4.ip_nonlocal_bind" = 1;
 
 ## Notes
 
-- This is the **write-path companion** to your Patroni setup -- Patroni elects the
+- This is the write-path companion to your Patroni setup -- Patroni elects the
   leader; this module finds it. It does not manage PostgreSQL or Patroni itself.
-- Running the proxy *on the same host* as a Patroni member is fine -- just set
+- Running the proxy on the same host as a Patroni member is fine -- just set
   `port` to something other than 5432 (e.g. `15432`) so it doesn't collide with
   the local PostgreSQL.
 - A Patroni member tagged `nofailover` still answers `/replica` while it streams,

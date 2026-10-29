@@ -5,10 +5,10 @@
 
   owner ? "ipverse",
   repo ? "rir-ip",
-  rev ? "7c8ed361db346baac03fcaa0d2965c1a12050d8e",
-  sha256 ? "sha256-jG9FVzTGgo7WSq/Dk+pqQiwu5c2UttS6TBrovTF56bU=",
+  rev ? "1e828cb4e413cf851bcb02e8b302174c0d488442",
+  sha256 ? "sha256-9YaZBDd8pIYyWhdzNaQfY3zaJBwlBlXYeLXGaaxNmw4=",
 
-  version ? "2026-03-08",
+  version ? "2026-10-01",
 }:
 
 stdenv.mkDerivation {

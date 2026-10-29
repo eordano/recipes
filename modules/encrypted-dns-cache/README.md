@@ -17,8 +17,8 @@ When resolution goes out to an encrypted upstream, it **bypasses your local
 split-horizon override, a blackhole entry) silently stops resolving the way you
 expect.
 
-The fix: on **every** service start (`preStart`), the module regenerates
-`networking.hosts` into a dnscrypt-proxy *cloaking* file and points the resolver
+The fix: on every service start (`preStart`), the module regenerates
+`networking.hosts` into a dnscrypt-proxy cloaking file and points the resolver
 at it. Cloaking rules are applied before the query ever leaves the machine, so
 your local overrides keep winning even though the upstream is encrypted. Because
 it's regenerated each start, the cloaking file never drifts from your declared
@@ -29,7 +29,7 @@ it's regenerated each start, the cloaking file never drifts from your declared
 When the uplink hiccups (a flaky link, saturation/bufferbloat, a brief ISP
 outage), fresh upstream lookups stall or fail and everything that needs DNS
 grinds. With `dnsmasq.useStaleCache = true`, dnsmasq's `--use-stale-cache` keeps
-answering popular names **instantly from expired cache entries** while it retries
+answering popular names instantly from expired cache entries while it retries
 the upstream in the background, instead of returning failure.
 
 ## Architecture
@@ -109,7 +109,7 @@ none of the lists is an evaluation error rather than a silent runtime fallback.
 
 ## Caveats
 
-- **Port 53 is enforced.** An assertion refuses to let dnsmasq bind a non-53
+- Port 53 is enforced. An assertion refuses to let dnsmasq bind a non-53
   port unless you explicitly set `dnsmasq.runOutsidePort53 = true` -- clients
   hard-expect DNS on 53.
 - The module sets `networking.nameservers = [ "127.0.0.1" ]`,
@@ -119,17 +119,17 @@ none of the lists is an evaluation error rather than a silent runtime fallback.
 - Ordering matters: dnsmasq is ordered `after` dnscrypt-proxy and
   `network-online.target`, and both restart on failure, so the cache never comes
   up pointing at a dead upstream port.
-- **The un-recoverable switch.** This module makes 127.0.0.1 the *only* resolver
+- The un-recoverable switch. This module makes 127.0.0.1 the only resolver
   on the box, so the resolver is now in the critical path of its own repair. By
-  default `nixos-rebuild switch` restarts a changed service with a *stop-then-start*:
+  default `nixos-rebuild switch` restarts a changed service with a stop-then-start:
   it stops the old unit early in activation and starts the new one late. If the
   switch is interrupted in that window -- or the new unit fails to start -- you
-  are left with **no `:53` listener at all**, and the box can no longer resolve
+  are left with no `:53` listener at all, and the box can no longer resolve
   anything (including the substituter/git host) to fetch its own fix. This bit us
   once for ~10h. The guard: both units set `stopIfChanged = false`, which turns
   the switch into a single atomic `systemctl restart` (no early-stop window), and
   dnsmasq carries `reloadTriggers = [ config.environment.etc.hosts.source ]` so a
-  bare hosts change **reloads** (SIGHUP re-reads `/etc/hosts`) instead of bouncing
+  bare hosts change reloads (SIGHUP re-reads `/etc/hosts`) instead of bouncing
   the unit that owns port 53. Real config changes still restart -- atomically.
 - Only expose the resolver to other machines (`bindInterfaces` + `openFirewall`)
   on a trusted network. `dnscrypt-proxy` itself only ever binds loopback; the
@@ -140,7 +140,7 @@ none of the lists is an evaluation error rather than a silent runtime fallback.
 
 ## Security notes
 
-- **The `nginx.enable` DoH proxy enforces TLS by default.** The generated
+- The `nginx.enable` DoH proxy enforces TLS by default. The generated
   virtualHost sets `forceSSL = true` and `enableACME = true`, so enabling it
   requires a working `security.acme` setup (`acceptTerms` + a contact email) --
   the build tells you exactly that if it's missing. If you provision

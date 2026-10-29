@@ -10,7 +10,6 @@ on:
       - "packages/**"
       - "lib/**"
       - "tools/**"
-      - "mkdocs.yml"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 

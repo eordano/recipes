@@ -13,7 +13,6 @@ let
     mkOption
     mkBefore
     types
-    optional
     ;
 
   identMapName = "hydra";
@@ -78,13 +77,34 @@ in
       '';
     };
 
-    buildMachinesFile = mkOption {
-      type = types.nullOr types.path;
-      default = null;
-      description = ''
-        Optional path to a Nix build-machines file listing remote builders
-        Hydra may dispatch jobs to. Null = build only on the local machine.
-      '';
+    localBuilder = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Run a hydra-builder agent on this host, attached to the queue
+          runner's loopback gRPC listener. The queue runner builds nothing
+          itself: without an agent every job waits forever. Disable it when
+          every build should go to remote agents (`services.hydra-builder`
+          elsewhere, pointed at `services.hydra.queueRunner.grpc`).
+        '';
+      };
+
+      maxJobs = mkOption {
+        type = types.ints.positive;
+        default = 4;
+        description = "Jobs the local agent runs at once.";
+      };
+
+      supportedFeatures = mkOption {
+        type = types.nullOr (types.listOf types.str);
+        default = null;
+        description = ''
+          Features the local agent advertises (`kvm`, `nixos-test`,
+          `big-parallel`, `benchmark`, ...). Null lets the agent derive them
+          from the nix daemon's system-features.
+        '';
+      };
     };
 
     maxOutputSize = mkOption {
@@ -111,7 +131,6 @@ in
       listenHost = "127.0.0.1";
       inherit (cfg) port;
       inherit (cfg) notificationSender;
-      buildMachinesFiles = optional (cfg.buildMachinesFile != null) cfg.buildMachinesFile;
       useSubstitutes = true;
 
       extraEnv = mkIf cfg.allowImportFromDerivation {
@@ -121,6 +140,14 @@ in
       extraConfig = ''
         max_output_size = ${toString cfg.maxOutputSize}
       '';
+    };
+
+    services.hydra-builder = mkIf cfg.localBuilder.enable {
+      enable = true;
+      queueRunnerAddr = "http://[::1]:${toString config.services.hydra.queueRunner.grpc.port}";
+      settings = {
+        inherit (cfg.localBuilder) maxJobs supportedFeatures;
+      };
     };
 
     services.postgresql = {

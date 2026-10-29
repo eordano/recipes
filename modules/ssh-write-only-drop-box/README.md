@@ -1,9 +1,9 @@
 # ssh-write-only-drop-box
 
-A **write-only artifact drop-box over SSH**. CI boxes `rsync` a directory in and
+A write-only artifact drop-box over SSH. CI boxes `rsync` a directory in and
 can never read, list, delete or overwrite anything. A systemd path unit notices
-each drop, waits for it to be complete, and either **promotes** it into
-`published/` or **quarantines** it with a machine-readable reason.
+each drop, waits for it to be complete, and either promotes it into
+`published/` or quarantines it with a machine-readable reason.
 
 ```
 CI runner --rsync--▶ sshd --ForceCommand--▶ rrsync -wo --▶ <dataDir>/incoming/<id>/
@@ -24,7 +24,7 @@ transport layer, not by the application.** Everything below is about the ways
 that sentence is half-implemented.
 
 Ships with a three-node NixOS VM test (`test.nix`) whose third node is a
-deliberate **half implementation**, so every "the drop-box refused" assertion is
+deliberate half implementation, so every "the drop-box refused" assertion is
 paired with the same request succeeding against the broken build. See
 [Testing](#testing).
 
@@ -36,7 +36,7 @@ way: an account that can write can also read, so every CI runner in the fleet
 can enumerate and exfiltrate every other project's artifacts, and a compromised
 runner can quietly rewrite history in `published/`.
 
-The fix is to make the *transport* refuse, and then to make the intake side
+The fix is to make the transport refuse, and then to make the intake side
 survive the fact that `rsync` will hand you half-finished directory trees.
 
 ### What upstream nixpkgs does not do
@@ -45,16 +45,16 @@ nixpkgs has all the parts and none of the assembly.
 
 - `nixos/modules/services/networking/ssh/sshd.nix:98` defines
   `users.users.<name>.openssh.authorizedKeys.keys` as a
-  `listOf singleLineStr` that is written **verbatim** into
+  `listOf singleLineStr` that is written verbatim into
   `/etc/ssh/authorized_keys.d/<user>` (`mkAuthKeyFile`, same file, lines
   143-160). There is no concept of a restricted role, a forced command, or a
   chroot. Whatever you put in the string is what you get.
 - `nixos/modules/services/networking/ssh/sshd.nix:444` defines
-  `services.openssh.authorizedKeysInHomedir` with **`default = true`**, and
+  `services.openssh.authorizedKeysInHomedir` with `default = true`, and
   lines 885-887 turn that into
   `AuthorizedKeysFile %h/.ssh/authorized_keys /etc/ssh/authorized_keys.d/%u`.
-  So on a stock NixOS host, *every* user's home directory is a key store. That
-  matters here more than anywhere, because this user's home *is* the drop-box.
+  So on a stock NixOS host, every user's home directory is a key store. That
+  matters here more than anywhere, because this user's home is the drop-box.
 - `pkgs/by-name/rr/rrsync/package.nix` packages the `rrsync` wrapper from the
   rsync source tree and stops there. No module consumes it.
 
@@ -76,12 +76,12 @@ on the belief that it strips `command=` / `restrict` handling and makes the
 server-side policy authoritative. It does nothing of the sort.
 `sshd_config(5)` (OpenSSH 10.4p1):
 
-> **PubkeyAuthOptions** -- Sets one or more public key authentication options.
-> The supported keywords are: `none` (**the default**; indicating no additional
+> PubkeyAuthOptions -- Sets one or more public key authentication options.
+> The supported keywords are: `none` (the default; indicating no additional
 > options are enabled), `touch-required` and `verify-required`.
 
 It is FIDO authenticator policy, and `none` is already the default. That `Match`
-block is a **no-op**. Anyone who reads it and concludes "good, the server owns
+block is a no-op. Anyone who reads it and concludes "good, the server owns
 the command" is wrong, and the entire write-only property is resting on a
 string prefix inside `authorized_keys` -- a file whose contents are exactly what
 you were trying to stop trusting.
@@ -124,7 +124,7 @@ The per-key `command="...",restrict` prefix is kept anyway. Two independent laye
 that each individually suffice is the point; and the key line documents its own
 intent when someone reads `authorized_keys` in isolation.
 
-Note what is **not** in that prefix: the common form is `restrict,pty`, and the
+Note what is not in that prefix: the common form is `restrict,pty`, and the
 `pty` there re-enables terminal allocation that `restrict` just took away.
 `rsync` has never needed a terminal. Drop it.
 
@@ -133,7 +133,7 @@ Note what is **not** in that prefix: the common form is `restrict,pty`, and the
 `home = dataDir` is the natural choice: it is where `rrsync` chroots, and it is
 where `rrsync` looks for its optional log file. But combined with
 `authorizedKeysInHomedir = true` (Trap 1's citation), sshd will read
-`<dataDir>/.ssh/authorized_keys` **for this user, on every login**.
+`<dataDir>/.ssh/authorized_keys` for this user, on every login.
 
 `<dataDir>` is owned by the push user. The promoter runs as the push user. So
 does every `onPromoted` / `validate` hook. Any of them -- or any bug in them --
@@ -154,7 +154,7 @@ end of file. `services.openssh.extraConfig` is `types.lines`; nixpkgs appends
 it after the generated settings (`sshd.nix:82-89`, `sshd.conf-final`) and
 reserves the front for itself with `lib.mkOrder 0` (`sshd.nix:893`). Any other
 module writing plain `extraConfig` merges at the default order -- which is
-*after* an unordered block from this module.
+after an unordered block from this module.
 
 The failure is not subtle, and it is not a warning:
 
@@ -177,7 +177,7 @@ explicitly against each other. `lib.mkAfter` (order 1500) is not enough on its
 own -- two `mkAfter`s are merged in module-evaluation order, which is not
 something you want to depend on for whether your sshd boots.
 
-### Trap 4 -- `rrsync -wo` blocks *reading*, and nothing else
+### Trap 4 -- `rrsync -wo` blocks reading, and nothing else
 
 Read `rrsync` (rsync 3.4.4, `support/rrsync`) rather than trusting the name.
 
@@ -189,18 +189,18 @@ if args.wo and am_sender:
 
 That is the entire meaning of `-wo`. In particular:
 
-- **Deletion is still allowed.** `--delete`, `--delete-before`,
-  `--remove-source-files` and friends are only disabled by the *separate*
+- Deletion is still allowed. `--delete`, `--delete-before`,
+  `--remove-source-files` and friends are only disabled by the separate
   `-no-del` flag (`if args.no_del: for opt in long_opts: if
   opt.startswith(('remove','delete')): long_opts[opt] = -1`). Without it, one
   pusher can `rsync --delete` away another pusher's in-flight drop. This module
   passes `-no-del` by default; `allowDelete = true` opts out.
-- **Overwriting is still allowed.** `-no-overwrite` (which appends
+- Overwriting is still allowed. `-no-overwrite` (which appends
   `--ignore-existing` server-side) is a third, independent flag. It defaults to
-  *off* here on purpose: with it on, a retried or resumed push reports success
+  off here on purpose: with it on, a retried or resumed push reports success
   while changing nothing, which is a worse failure than an overwrite. Use
   unique, content-addressed ids instead.
-- **Pushes serialise.** Unless `-no-lock` is passed, `rrsync` takes an
+- Pushes serialise. Unless `-no-lock` is passed, `rrsync` takes an
   exclusive `flock` on the restricted directory before doing anything:
 
   ```python
@@ -214,7 +214,7 @@ That is the entire meaning of `-wo`. In particular:
   that is a stream of red CI jobs and no server-side evidence. `serializePushes
   = false` trades that for interleaved uploads. Note that a client which sends
   payload and sentinel as two runs (as it must -- Trap 5) releases the lock in
-  between either way, so the lock never protects a *drop*, only a *transfer*.
+  between either way, so the lock never protects a drop, only a transfer.
 
 Operational bonus from the same file: `rrsync` opens `rrsync.log` **relative to
 the process's working directory**, which sshd sets to the user's home, and only
@@ -230,14 +230,14 @@ deleting the file turns it off. No config change, no restart.
 
 ### Trap 5 -- rsync has no atomic "I am done" signal
 
-The path unit fires when `incoming/<id>/` is *created*, which is at the very
+The path unit fires when `incoming/<id>/` is created, which is at the very
 beginning of the transfer. A promoter that acts on that event moves a
 half-uploaded tree into `published/` and calls it a build.
 
 There is no rsync-side fix. The contract has to be built:
 
 1. The pusher sends the payload.
-2. The first `rsync` **exits**.
+2. The first `rsync` exits.
 3. The pusher sends a sentinel file -- alone, in a second `rsync` run.
 
 Steps 1 and 3 must not be merged into one run. rsync gives no ordering guarantee
@@ -252,34 +252,34 @@ incomplete upload: sentinel '.done' not seen within 120s
 
 Three things about that wait that are easy to get wrong:
 
-- **The clock starts when the drop first appears**, not when the last byte
-  lands. Size `doneTimeoutSec` against your slowest realistic *whole upload*,
+- The clock starts when the drop first appears, not when the last byte
+  lands. Size `doneTimeoutSec` against your slowest realistic whole upload,
   not against a stall.
-- **You cannot watch for the sentinel with a second path unit.**
+- You cannot watch for the sentinel with a second path unit.
   `systemd.path(5)`: *"Note that files whose name starts with a dot (i.e.
   hidden files) are generally ignored when monitoring these paths."* A
   dot-prefixed sentinel is invisible to inotify-based path units -- which is
-  precisely why it is a *good* sentinel name (it can never be mistaken for a new
+  precisely why it is a good sentinel name (it can never be mistaken for a new
   drop) and precisely why the worker must poll.
-- **Even a non-dot sentinel would not help.** `PathModified=` on
+- Even a non-dot sentinel would not help. `PathModified=` on
   `incoming/` watches that directory, not its subtree; events inside
   `incoming/<id>/` never reach it.
 
-The worker also requires the sentinel to be a **regular file** (`test -f`), so a
+The worker also requires the sentinel to be a regular file (`test -f`), so a
 pusher cannot satisfy it with a directory of the same name.
 
-### Trap 6 -- the watcher disables itself under load, and the *service's* rate limit is the one that gets you
+### Trap 6 -- the watcher disables itself under load, and the service's rate limit is the one that gets you
 
 Two independent rate limits sit in front of this design, and both fail closed by
-**turning the watcher off**, not by throttling.
+turning the watcher off, not by throttling.
 
 `systemd.path(5)` on the path unit's own limit:
 
-> `TriggerLimitIntervalSec=` ... defaults to **2s** ... `TriggerLimitBurst=` ...
-> defaults to **200** ... **If the limit is hit, the unit is placed into a failure
+> `TriggerLimitIntervalSec=` ... defaults to 2s ... `TriggerLimitBurst=` ...
+> defaults to 200 ... **If the limit is hit, the unit is placed into a failure
 > mode, and will not watch the paths anymore until restarted.**
 
-That one is usually fine. The one that bites is the *triggered service's* start
+That one is usually fine. The one that bites is the triggered service's start
 limit, same man page:
 
 > **Unlike other service failures, the error condition that the start rate limit
@@ -289,7 +289,7 @@ limit, same man page:
 systemd's defaults are `DefaultStartLimitBurst=5` per
 `DefaultStartLimitIntervalSec=10s`. A single push produces two or three inotify
 events on `incoming/` (directory create, then the attribute/mtime writes rsync
-does at the end), so **three near-simultaneous pushes** can exceed five starts
+does at the end), so three near-simultaneous pushes can exceed five starts
 in ten seconds. The dispatcher fails, the failure propagates, the path unit dies,
 and intake is silently dead until someone reboots the box. There is no alert
 because nothing crashed -- the artifacts just stop arriving.
@@ -300,9 +300,9 @@ So this module:
   tuning it -- the dispatcher is idempotent and cheap, so a hot loop of it is a
   non-event compared to a dead intake),
 - leaves `TriggerLimitBurst` at systemd's own 200 and never lowers it (a
-  "tighter for safety" value like `20 per 5s` makes the failure *more* likely,
+  "tighter for safety" value like `20 per 5s` makes the failure more likely,
   which is the opposite of what it looks like it does), and
-- ships a **sweep timer** (`sweepInterval`, default 5 min) that runs
+- ships a sweep timer (`sweepInterval`, default 5 min) that runs
   `systemctl reset-failed <name>-watch.path`, restarts it, and re-runs the
   dispatcher. That covers the failed-path case, events lost while units were
   restarting during a deploy, and filesystems where inotify does not fire at
@@ -342,32 +342,32 @@ exit status 0.
 This is not remotely reachable -- instance names come from the dispatcher, which
 derives them with `basename` from a glob, so `/` can never appear. It needs root
 to trigger. That is not a reason to leave it in: "unreachable today" is a
-property of the *caller*, and this unit's caller is one `systemctl start` away
+property of the caller, and this unit's caller is one `systemctl start` away
 from being a human.
 
 The rules this module applies, in order:
 
-1. **Worker**: validate `%I` against a strict class -- non-empty, `<= maxIdLength`
+1. Worker: validate `%I` against a strict class -- non-empty, `<= maxIdLength`
    (128) characters, all from `[A-Za-z0-9._-]`, no `/`, no whitespace, no
-   leading dot -- **before constructing a single path**. On failure, log and exit
+   leading dot -- before constructing a single path. On failure, log and exit
    0 without touching the filesystem. A drop that arrived through the dispatcher
    can never fail this, so failing it means a human typed something.
-2. **Dispatcher**: enumerate `incoming/*/` with `dotglob` and take
+2. Dispatcher: enumerate `incoming/*/` with `dotglob` and take
    `basename`. A name that fails the same class is quarantined **by its glob
    path** -- a real path with no traversal in it regardless of what the uploader
    called the directory -- into `quarantine/rejected-<sha256[0:16]>` with a
    `.reason` beside it. `dotglob` matters: without it, a drop named `.evil`
    is invisible to both the glob and (per Trap 5) the path unit, and
    accumulates forever.
-3. **Per-id `flock`** in `work/<id>.lock` before any state change, and a
-   re-check of every precondition *after* taking it. systemd already refuses to
+3. Per-id `flock` in `work/<id>.lock` before any state change, and a
+   re-check of every precondition after taking it. systemd already refuses to
    run two instances of the same templated unit, so this mostly covers hand-run
    invocations and the sweep firing into a live worker -- but it is two lines.
 4. `mv -T` rather than `mv` for the promotion. Plain `mv src dst` on an existing
-   directory `dst` moves `src` *inside* it; `mv -T` fails instead. That closes
+   directory `dst` moves `src` inside it; `mv -T` fails instead. That closes
    the check-then-move race that a preceding `[ ! -e "$published" ]` leaves
    wide open.
-5. A **post-move re-check** that `realpath published/<id>` is still under
+5. A post-move re-check that `realpath published/<id>` is still under
    `realpath published/`, which catches a symlink planted as the published root
    or as the drop's own top level. This is the one condition that exits
    non-zero, because it means an invariant broke rather than an upload being
@@ -388,7 +388,7 @@ this, or switch to `%i` plus `systemd-escape -u` in the worker.
 `systemd.exec(5)`:
 
 > Paths listed in `ReadWritePaths=` are accessible from within the namespace
-> **with the same access modes as from outside of it**. ... Use `ReadWritePaths=`
+> with the same access modes as from outside of it. ... Use `ReadWritePaths=`
 > in order to allow-list specific paths for write access **if
 > `ProtectSystem=strict` is used**.
 
@@ -399,7 +399,7 @@ not.
 The other half of the trap is that you cannot just add `ProtectSystem=strict`
 everywhere. Connecting to an `AF_UNIX` socket needs write access to the socket
 inode, so under `strict` the whole of `/run` -- including
-`/run/systemd/private` -- is read-only and **every `systemctl` call fails**.
+`/run/systemd/private` -- is read-only and every `systemctl` call fails.
 
 So the units are split by what they need:
 
@@ -426,7 +426,7 @@ This account is currently not available.
 
 and no other clue anywhere. The module sets `shell = lib.mkDefault
 pkgs.bashInteractive`. Giving the drop-box account a real shell is safe here
-*because* `ForceCommand` replaces whatever the client asked for -- but it is only
+because `ForceCommand` replaces whatever the client asked for -- but it is only
 safe as long as Trap 1's block is actually present and actually last.
 
 ### Trap 10 -- promotion is a rename, so keep the tree on one filesystem
@@ -446,7 +446,7 @@ Restricting sshd to the drop-box account looks like an obvious extra layer:
 services.openssh.settings.AllowUsers = [ cfg.user ];
 ```
 
-`AllowUsers` is a **global allow-list**. Setting it locks out every other
+`AllowUsers` is a global allow-list. Setting it locks out every other
 account on the host, including yours, including your deploy tooling. On a remote
 box that is a site visit. It is `manageAllowUsers`, default `false`, and it
 should usually stay false -- the `Match User` block already constrains the
@@ -524,7 +524,7 @@ second way creates `incoming/incoming/<id>` and is never promoted.
 - A rejected drop is `quarantine/<id>` plus `quarantine/<id>.reason` -- one line
   of plain text. Nothing is ever deleted on rejection, and no unit goes red;
   `journalctl -u '<name>@*'` and `cat quarantine/*.reason` are the two commands.
-- Malformed drop *names* land in `quarantine/rejected-<digest>` since the name
+- Malformed drop names land in `quarantine/rejected-<digest>` since the name
   itself is unsafe to reuse as a path.
 - To re-run promotion for one id by hand:
   `systemctl start "<name>@$(systemd-escape -- "$id").service"`.
@@ -536,7 +536,7 @@ second way creates `incoming/incoming/<id>` and is never promoted.
 | --- | --- | --- |
 | `services.sshDropBox.enable` | `false` | Nothing applies until this is on. |
 | `.name` | `"drop-box"` | Prefix for every unit: `<name>-watch.path`, `<name>-dispatch.service`, `<name>@.service`, `<name>-sweep.{service,timer}`. |
-| `.dataDir` | *(required)* | Root of `incoming/`, `published/`, `quarantine/`, `work/`. One filesystem -- Trap 10. |
+| `.dataDir` | (required) | Root of `incoming/`, `published/`, `quarantine/`, `work/`. One filesystem -- Trap 10. |
 | `.user` / `.group` | `"dropbox"` | The push account. Gets `shell = mkDefault bashInteractive` -- Trap 9. |
 | `.pushKeys` | `[ ]` | Public keys, each written with `command="...",restrict`. Asserted non-empty. |
 | `.rrsyncPackage` | `pkgs.rrsync` | Standard `mkPackageOption`. |
@@ -551,10 +551,10 @@ second way creates `incoming/incoming/<id>` and is never promoted.
 | `.onQuarantined` | `""` | Same, plus `DROPBOX_REASON`. |
 | `.hookPackages` | `[ ]` | `PATH` for the three hooks. |
 | `.extraReadWritePaths` | `[ ]` | Extra writable paths for hooks under `ProtectSystem=strict`. Trap 8. |
-| `.afterUnit` | `null` | Added to `After=` **and** `Requires=` of every unit. |
+| `.afterUnit` | `null` | Added to `After=` and `Requires=` of every unit. |
 | `.manageAllowUsers` | `false` | Set `services.openssh.settings.AllowUsers`. Read Trap 11 first. |
 | `.installClient` | `false` | Put `<name>-push` in `environment.systemPackages` here. |
-| `.clientPackage` | *(read-only)* | The generated client, for a pusher host to consume. |
+| `.clientPackage` | (read-only) | The generated client, for a pusher host to consume. |
 | `.triggerLimitIntervalSec` | `"10s"` | Path unit `TriggerLimitIntervalSec=`. |
 | `.triggerLimitBurst` | `200` | Path unit `TriggerLimitBurst=`; 0 disables. Do not lower -- Trap 6. |
 | `.sweepInterval` | `"5min"` | Catch-up timer; `null` disables. Trap 6. |
@@ -581,27 +581,27 @@ A happy-path test of this module is worthless. "The client pushed a directory
 and could not read it back" is satisfied by a half implementation that only
 writes `command="...",restrict` into `authorized_keys` -- and Traps 1-4 are all
 about how that half is trivially bypassable. So the test carries a third node,
-`unpaired`: the same push user, the same shell, the module's **own** generated
+`unpaired`: the same push user, the same shell, the module's own generated
 `command="...",restrict` lines (lifted out of a real `eval-config` of the recipe,
 not re-typed), and no `Match` block. Every refusal asserted on `server` is
-followed by the same request *succeeding* on `unpaired`.
+followed by the same request succeeding on `unpaired`.
 
 Two ways to build that control wrong, both hit while writing this test:
 
 * **`services.openssh.extraConfig = lib.mkForce ""` does not strip only the
   Match block.** nixpkgs emits `AuthorizedKeysFile`, `HostKey`, `Port` and
-  `Subsystem sftp` through that *same option* at `mkOrder 0`
+  `Subsystem sftp` through that same option at `mkOrder 0`
   (`nixos/modules/services/networking/ssh/sshd.nix:893-914`). Forcing it empty
   breaks public-key authentication outright, and the control then "proves" the
   bypass is impossible -- for entirely the wrong reason. The control node
   therefore does not import the recipe at all.
-* **`ssh -i <key>` still offers the default identity.** Without
+* `ssh -i <key>` still offers the default identity. Without
   `IdentitiesOnly=yes`, every "this key must not authenticate" subtest is
   answered by `~/.ssh/id_ed25519` -- the legitimate push key -- and passes while
   testing nothing.
 
 The subtest that keeps Trap 2 honest asserts its own premise first: it greps the
-generated `sshd_config` for a *global* `AuthorizedKeysFile` containing
+generated `sshd_config` for a global `AuthorizedKeysFile` containing
 `%h/.ssh/authorized_keys`. If a future nixpkgs flips
 `authorizedKeysInHomedir` to `false`, the premise assertion fails loudly instead
 of the subtest silently becoming vacuous.
@@ -609,20 +609,20 @@ of the subtest silently becoming vacuous.
 ### What it asserts
 
 1. topology sanity -- no `192.168.*` anywhere, one address per interface;
-2. a push key **can** rsync a directory in, and the drop is promoted once its
+2. a push key can rsync a directory in, and the drop is promoted once its
    sentinel lands;
-3. that key cannot **list** the drop-box;
-4. ...cannot **read** anything back (rsync pull, and `scp` of an absolute path);
-5. ...cannot **overwrite** -- with `allowOverwrite = false` the push *succeeds* and
+3. that key cannot list the drop-box;
+4. ...cannot read anything back (rsync pull, and `scp` of an absolute path);
+5. ...cannot overwrite -- with `allowOverwrite = false` the push succeeds and
    changes nothing, so the assertion is on the content, not the exit status;
-6. ...cannot **delete**;
-7. ...cannot run an **arbitrary command**, and cannot get a shell;
-8. **pairing:** an unrestricted key in the managed `authorized_keys` file gets
+6. ...cannot delete;
+7. ...cannot run an arbitrary command, and cannot get a shell;
+8. pairing: an unrestricted key in the managed `authorized_keys` file gets
    neither a command nor a TCP forward -- and the same key on `unpaired` gets
    both;
-9. **pairing:** a key planted in the push user's own `~/.ssh/authorized_keys`
+9. pairing: a key planted in the push user's own `~/.ssh/authorized_keys`
    does not authenticate -- and does on `unpaired`;
-10. **pairing:** the `Match` block is the last thing in `sshd_config`, with
+10. pairing: the `Match` block is the last thing in `sshd_config`, with
     nothing unindented after it (Trap 3);
 11. the "no atomic done signal" trap: a drop whose sentinel never arrives is
     never promoted and is quarantined with a reason once `doneTimeoutSec`
@@ -635,7 +635,7 @@ of the subtest silently becoming vacuous.
 
 ### Verified by mutation
 
-Every group above was watched **failing** against a deliberately broken copy of
+Every group above was watched failing against a deliberately broken copy of
 the recipe before being trusted:
 
 | Mutation | Test outcome |
@@ -653,42 +653,42 @@ a claim, not evidence.
 
 ## Caveats
 
-- **The hooks run as the push account**, inside the drop-box's own directory
+- The hooks run as the push account, inside the drop-box's own directory
   tree, with whatever `hookPackages` you gave them. Trap 2 removed the
   home-directory key store, but a hook is still the most privileged thing on
   this box that touches uploader-controlled bytes. Treat `validate` as parsing
   hostile input, because it is.
-- **A re-push to an already-promoted id is quarantined**, not merged. That is
+- A re-push to an already-promoted id is quarantined, not merged. That is
   deliberate -- the alternative is a published artifact whose contents change
   under readers -- but it means ids must be unique per push. A
   `<unix-ts>-<short-sha>-<project>` shape fits the character class and sorts
   usefully.
-- **Nothing here garbage-collects.** `published/` and `quarantine/` grow without
+- Nothing here garbage-collects. `published/` and `quarantine/` grow without
   bound. Add a `systemd.tmpfiles` age rule or a timer of your own; the module
   does not guess a retention policy.
-- **`installClient` puts the client on the receiver**, which is only useful when
+- `installClient` puts the client on the receiver, which is only useful when
   the receiver also builds. Pusher hosts should take `clientPackage` or vendor
   `push.sh`.
-- **Quarantine reuses the drop id.** A second bad push with the same id replaces
-  the first (`rm -rf` on a *validated* id, then `mv -T`). If you need every
+- Quarantine reuses the drop id. A second bad push with the same id replaces
+  the first (`rm -rf` on a validated id, then `mv -T`). If you need every
   rejection preserved, move them aside from `onQuarantined`.
-- **`rrsync` is Python.** `pkgs.rrsync` pulls in a `python3` closure and, for
+- `rrsync` is Python. `pkgs.rrsync` pulls in a `python3` closure and, for
   brace-expansion support, `python3Packages.braceexpand`. On a minimal image
   that is a few tens of MB you may not have budgeted for.
-- **This module drives no firewall rules.** Intake rides the SSH port you
+- This module drives no firewall rules. Intake rides the SSH port you
   already have open, so there is no `networking.firewall.extraCommands` /
   nftables-backend conflict to worry about.
 
 ## See also
 
 - [`spool-dir-credential-broker`](spool-dir-credential-broker.md) -- the mirror
-  image: a shared spool directory where *producers* are unprivileged and one
+  image: a shared spool directory where producers are unprivileged and one
   watcher holds the secret. Same "drop a file, a unit picks it up" shape, same
   sentinel and validation concerns.
 - [`push-observability-receiver`](push-observability-receiver.md) -- the same
   push-not-pull posture for logs and metrics rather than artifacts.
 
-What is deliberately **not** here: rendering an index over `published/`. Serving
+What is deliberately not here: rendering an index over `published/`. Serving
 the drops is a product decision (schema, theme, access control, cache headers)
 with no general answer, and welding one into the intake makes the intake
 untestable on its own. `onPromoted` is the seam -- have it touch a file that your

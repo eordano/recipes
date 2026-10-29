@@ -6,7 +6,7 @@ current live forwarded socket.
 
 ## The problem
 
-Every fresh `ssh -A` connection into a box creates a **new, randomly named**
+Every fresh `ssh -A` connection into a box creates a new, randomly named
 agent-forwarding socket (something like `~/.ssh/agent/s.12345`). `sshd` sets
 `SSH_AUTH_SOCK` to that path for the session it started.
 
@@ -23,53 +23,53 @@ value forever. So:
 
 ## The fix
 
-Introduce a level of indirection: one **stable** path (default
+Introduce a level of indirection: one stable path (default
 `~/.ssh/agent.sock`) that is always a symlink to the current live forwarded
 socket.
 
 - Long-lived processes (tmux panes, detached jobs) export `SSH_AUTH_SOCK`
-  pointing at the **stable** path and capture that once.
+  pointing at the stable path and capture that once.
 - Every new login re-points the symlink at the fresh forwarded socket.
 - Result: agent forwarding "just works" after `tmux attach` from a new SSH
   session, with no per-prompt refresh and no re-attaching panes.
 
 This is installed three ways so the link is fresh no matter how you arrive:
 
-- **bash** interactive-shell init (`bashSshHook`)
-- **fish** interactive-shell init (`fishSshHook`)
-- **`~/.ssh/rc`** (`sshRc`), which `sshd` runs on *every* connection --
+- bash interactive-shell init (`bashSshHook`)
+- fish interactive-shell init (`fishSshHook`)
+- `~/.ssh/rc` (`sshRc`), which `sshd` runs on every connection --
   including non-interactive ones where no login shell ever starts.
 
 ## The traps it defends against (the interesting part)
 
-**1. Don't clobber a working link with an agent-less session.**
+1. Don't clobber a working link with an agent-less session.
 A session with no forwarded agent at all (for example a Tailscale-SSH session,
 or a plain `ssh` without `-A`) exports an empty or non-socket `SSH_AUTH_SOCK`.
 Blindly relinking on every login would point your stable link at nothing and
 break the panes that were working. The hook only adopts the incoming socket
-when it is a real socket (`-S`) **and** is not already the stable link.
+when it is a real socket (`-S`) and is not already the stable link.
 
-**2. Read `ssh-add -l` exit codes correctly -- the socket, not the keys.**
+2. Read `ssh-add -l` exit codes correctly -- the socket, not the keys.
 `ssh-add -l` exits:
 
-| exit | meaning                          |
-|------|----------------------------------|
-| 0    | socket live, agent has keys      |
-| 1    | socket live, agent has **no** keys |
-| >1   | socket **dead** / unreachable    |
+| exit | meaning |
+|---|---|
+| 0 | socket live, agent has keys |
+| 1 | socket live, agent has no keys |
+| >1 | socket dead / unreachable |
 
-The liveness test is therefore **`exit > 1 == dead`**, *not* "exit != 0".
+The liveness test is therefore `exit > 1 == dead`, not "exit != 0".
 Testing for non-zero would wrongly declare a perfectly good agent-with-no-keys
 socket dead and start thrashing the link. When the stable link is found dead,
 the hook self-heals: it scans candidate forwarded sockets newest-first and
 relinks to the first live one.
 
-**3. A hung mux must never stall shell startup.**
+3. A hung mux must never stall shell startup.
 If there is a broken or hung SSH multiplexer to a remote host, `ssh-add -l`
 against a dead socket can block. The probe is wrapped in `timeout 1`, so a hung
 socket costs at most a second and shell startup never hangs.
 
-**4. Use a fixed `timeout` store path.**
+4. Use a fixed `timeout` store path.
 The hooks call `${pkgs.coreutils}/bin/timeout`, not a bare `timeout`, so they
 work even on hosts (e.g. macOS) where coreutils is not on the default
 interactive PATH.
@@ -92,7 +92,7 @@ interactive PATH.
 ### Options
 
 | option | default | purpose |
-|--------|---------|---------|
+|---|---|---|
 | `programs.stableAgentSock.enable` | `false` | Turn the module on. |
 | `stableSock` | `"$HOME/.ssh/agent.sock"` | Shell expr for the stable symlink path processes pin to. |
 | `candidateSocketGlob` | `"$HOME/.ssh/agent/s.*"` | Glob of ephemeral forwarded sockets to scan when self-healing. Point at wherever your forwarded sockets land. |
@@ -112,10 +112,10 @@ what the default glob assumes. Adjust to your layout.
 
 ## Caveats
 
-- **Home Manager module.** If you don't use Home Manager, lift `bashSshHook` /
+- Home Manager module. If you don't use Home Manager, lift `bashSshHook` /
   `fishSshHook` / `sshRc` from the `let` block in `default.nix` into your own
   shell rc and `~/.ssh/rc` by hand -- the shell logic is the reusable core.
-- **`~/.ssh/rc` suppresses sshd's built-in xauth handling.** Installing any
+- `~/.ssh/rc` suppresses sshd's built-in xauth handling. Installing any
   `~/.ssh/rc` disables sshd's automatic `xauth` cookie handling, so `sshRc`
   re-implements it. If you enable X11 forwarding and rely on it, keep that
   block; if you don't forward X11 it's a harmless no-op.

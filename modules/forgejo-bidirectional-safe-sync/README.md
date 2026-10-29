@@ -1,19 +1,19 @@
 # forgejo-bidirectional-safe-sync
 
-A NixOS module that keeps **two Forgejo instances mirrored to each other** from a
+A NixOS module that keeps two Forgejo instances mirrored to each other from a
 neutral third box -- so neither forge depends on the other for backup or HA.
 
 Each timer tick, the sync engine walks every repo on both sides via the Forgejo
-API and reconciles refs **symmetrically**:
+API and reconciles refs symmetrically:
 
-- **fast-forward** a ref wherever it is safe (one side strictly ahead of the other),
-- **propagate** brand-new repos and refs to the peer,
-- and **alert** on genuine divergence (both sides moved, neither is an ancestor
+- fast-forward a ref wherever it is safe (one side strictly ahead of the other),
+- propagate brand-new repos and refs to the peer,
+- and alert on genuine divergence (both sides moved, neither is an ancestor
   of the other) instead of force-pushing over either side.
 
 ## Why a third box?
 
-If forge A backed up *to* forge B (or vice versa), losing one forge degrades the
+If forge A backed up to forge B (or vice versa), losing one forge degrades the
 other's recovery story, and the natural "just push" fix is a force-push waiting
 to clobber real work. Running the reconciler on an independent host makes the
 relationship peer-to-peer: when either forge is down, the survivor still holds a
@@ -24,13 +24,13 @@ exactly the machinery you want during an unplanned outage of one forge.
 
 The reconciler is built to never destroy history. It:
 
-- issues **no `--force` / `--force-with-lease` pushes** -- a non-fast-forward push
+- issues no `--force` / `--force-with-lease` pushes -- a non-fast-forward push
   is refused by Forgejo and logged;
-- **never deletes refs** -- deleting a branch on one side does *not* propagate;
-- **never deletes or renames repos** -- a repo present on one side but missing on
+- never deletes refs -- deleting a branch on one side does not propagate;
+- never deletes or renames repos -- a repo present on one side but missing on
   the other (after having been seen on both) is flagged as
   `rename-or-delete-suspected` and skipped, not re-created or removed;
-- **never auto-creates owners** -- if a new repo's owner doesn't exist on the
+- never auto-creates owners -- if a new repo's owner doesn't exist on the
   target, it is skipped and alerted (optionally routed to a fallback org, see
   `unownedReposTarget`).
 
@@ -46,8 +46,8 @@ file as its `EnvironmentFile`. (Both steps run unprivileged -- see the next
 section.)
 
 Because `/run` is tmpfs, **the env file does not exist on the first cycle after
-boot**, and systemd loads `EnvironmentFile` *before* it runs `ExecStartPre` (the
-step that creates it). If the path is listed **without** a leading `-`, the unit
+boot**, and systemd loads `EnvironmentFile` before it runs `ExecStartPre` (the
+step that creates it). If the path is listed without a leading `-`, the unit
 dies with `Failed to load environment files` before the pre-step can ever run --
 a permanent boot-time loop.
 
@@ -101,7 +101,7 @@ unprivileged `forgejo-bisync` user throughout, and an assertion rejects
 }
 ```
 
-Run this module on a host that is **neither** forge. You are responsible for
+Run this module on a host that is neither forge. You are responsible for
 provisioning the `username` admin account (with `passwordFile`'s password) on
 both Forgejo instances -- a tiny declarative bootstrap per forge, or a manual
 admin user, both work. The account needs admin scope so the API can enumerate
@@ -112,12 +112,12 @@ every repo and create repos on either side.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `enable` | `false` | Turn the timer + sync service on. |
-| `syncScript` | *(required)* | Path to the reconciliation engine. |
+| `syncScript` | (required) | Path to the reconciliation engine. |
 | `interpreter` | `node --experimental-strip-types` | Argv prefix to run the script; `null` to exec it directly. |
-| `instances` | *(required)* | Exactly two `{ name; baseUrl; }` forges. `name` is the git remote name and log label. |
+| `instances` | (required) | Exactly two `{ name; baseUrl; }` forges. `name` is the git remote name and log label. |
 | `user` | `forgejo-bisync` | System user/group and `/run` subdir name. |
 | `username` | `bisync` | Admin login present on both forges. |
-| `passwordFile` | *(required)* | File with the shared admin password. |
+| `passwordFile` | (required) | File with the shared admin password. |
 | `interval` | `5min` | `OnUnitActiveSec` between cycles. |
 | `workDir` | `/var/lib/forgejo-bisync` | Bare clones + `state.json`. |
 | `parallelism` | `1` | Repos processed concurrently. |
@@ -130,7 +130,7 @@ every repo and create repos on either side.
 
 The module is deliberately just the packaging (system user, secret plumbing,
 hardened oneshot service, and timer). The reconciliation logic is an external
-script you supply via `syncScript`. It receives **all** of its configuration
+script you supply via `syncScript`. It receives all of its configuration
 from environment variables in the tmpfs env file -- no CLI args, no config file:
 
 | Env var | From option |
@@ -149,19 +149,19 @@ from environment variables in the tmpfs env file -- no CLI args, no config file:
 
 A conformant engine, per cycle, does roughly:
 
-1. **Discover** -- `GET /api/v1/repos/search` on both instances (paginated) using
+1. Discover -- `GET /api/v1/repos/search` on both instances (paginated) using
    HTTP Basic Auth with `username:password`. The admin account sees every repo.
-2. **For each repo present on both sides**, fetch all heads and tags into a bare
+2. For each repo present on both sides, fetch all heads and tags into a bare
    clone (one namespaced remote per instance), then per ref:
    - equal SHAs -> nothing to do;
    - present on one side only -> fast-forward push to the other;
    - both present, one is a strict ancestor of the other -> fast-forward the
      behind side up to the ahead side;
-   - both moved, neither an ancestor -> **diverged**: log it, never force.
-3. **For a repo present on one side only** -- if never seen before, create it on
+   - both moved, neither an ancestor -> diverged: log it, never force.
+3. For a repo present on one side only -- if never seen before, create it on
    the target (respecting `unownedReposTarget`) and seed every ref; if seen
    before, treat as a suspected rename/delete and skip.
-4. **Persist** a small `state.json` (last-synced ref SHAs, `divergedSince`
+4. Persist a small `state.json` (last-synced ref SHAs, `divergedSince`
    timestamps) so divergence can be aged before escalating to
    `alert-divergence`, and so a vanished repo can be distinguished from a
    brand-new one.
@@ -190,7 +190,7 @@ collect results into a map.
 
 ## Caveats
 
-- **Exactly two** instances, with **distinct** `name` values (both asserted).
+- Exactly two instances, with distinct `name` values (both asserted).
 - The admin password is the same on both forges by design -- it is the shared
   identity the reconciler authenticates as. Scope it to a dedicated bisync
   account, not a human admin.

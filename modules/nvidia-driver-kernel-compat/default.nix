@@ -48,12 +48,12 @@ let
       patchesOpen = [ kernel_6_18_stdarg_patch ];
     };
     "570" = mkDriver {
-      version = "570.195.03";
-      sha256_64bit = "sha256-1H3oHZpRNJamCtyc+nL+nhYsZfJyL7lgxPUxvXrF3B4=";
-      sha256_aarch64 = "sha256-o4rgB6vo+Cv90lJywovIyVARRGS3R15zYQUj+f1nzWQ=";
-      openSha256 = "sha256-vCBB/UJgVKHlSEWdgoF45lODr3YJmR6JwjrwWgWszBw=";
-      settingsSha256 = "sha256-mjKkMEPV6W69PO8jKAKxAS861B82CtCpwVTeNr5CqUY=";
-      persistencedSha256 = "sha256-BMpo2PIabhHjZQqUQi/W5DYhgAPmfCdFvXdN6ND2Bfs=";
+      version = "570.211.01";
+      sha256_64bit = "sha256-bQOMT7g0SOpKPSW9qxVWUU1awdpDN3hZ4FhiGaJf9ys=";
+      sha256_aarch64 = "sha256-qxRKgovi+5lWEluXP5TZG3M7SRHjoCYsuCcTSx1uK4E=";
+      openSha256 = "sha256-qNOnR9ldnfDciEL7yGytIcAYTrvoXZyZwnBb0yRkJvk=";
+      settingsSha256 = "sha256-k3eEFg8yWutw/M0VjqJdUsab4/DPnbs9GvPYuYdMUsI=";
+      persistencedSha256 = "sha256-9dE2OeqjhqhID44PnmnIs5bKmGYaHRKaaKlx90BItVc=";
       patchesOpen = [ kernel_6_18_stdarg_patch ];
     };
     "590" = mkDriver {

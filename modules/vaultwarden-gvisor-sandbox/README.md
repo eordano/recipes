@@ -1,8 +1,8 @@
 # vaultwarden-gvisor-sandbox
 
 A NixOS module that runs a self-hosted [Vaultwarden](https://github.com/dani-garcia/vaultwarden)
-(Bitwarden-compatible) password vault as a **gVisor-sandboxed** podman container,
-built from a **locally-produced, registry-free** reproducible image, with nginx
+(Bitwarden-compatible) password vault as a gVisor-sandboxed podman container,
+built from a locally-produced, registry-free reproducible image, with nginx
 terminating TLS in front of it.
 
 ## The problem
@@ -10,32 +10,32 @@ terminating TLS in front of it.
 A secrets vault is about the highest-value target on your network. Two failure
 modes worry you most:
 
-1. A container escape or a Vaultwarden RCE reaching the **host kernel**.
-2. A poisoned or moved **upstream image** silently changing what you run.
+1. A container escape or a Vaultwarden RCE reaching the host kernel.
+2. A poisoned or moved upstream image silently changing what you run.
 
 This module addresses both without giving up on containers.
 
 ## The approach
 
-- **gVisor sandbox.** The container runs under `--runtime=runsc-host`. Syscalls
+- gVisor sandbox. The container runs under `--runtime=runsc-host`. Syscalls
   hit gVisor's user-space kernel (`runsc`) instead of the host kernel, so a
   container escape has a much smaller and better-isolated surface to attack.
   The module registers the `runsc-host` runtime for podman itself, so it is
   self-contained.
 
-- **Image built locally.** Instead of `docker pull`, the image is produced with
+- Image built locally. Instead of `docker pull`, the image is produced with
   `dockerTools.buildLayeredImage` from nixpkgs' `vaultwarden` package. There is
   no registry to trust, the build is reproducible, and the version is pinned to
   whatever your nixpkgs provides.
 
-- **nginx terminates TLS, proxies loopback.** The container binds a loopback
+- nginx terminates TLS, proxies loopback. The container binds a loopback
   port; nginx does HTTPS and reverse-proxies to `127.0.0.1`. **Websockets are
   left on** (`proxyWebsockets = true`) -- without them, live vault sync between
   clients stops working.
 
-- **`--network=host`.** The container binds `port` directly and nginx reaches it
+- `--network=host`. The container binds `port` directly and nginx reaches it
   on loopback with no port-mapping layer in between. Because the container shares
-  the host network namespace, `listenAddress` is a **host-wide** bind -- it
+  the host network namespace, `listenAddress` is a host-wide bind -- it
   defaults to `127.0.0.1` so the plaintext vault port is never exposed off-box.
   The raw port speaks unencrypted HTTP; only nginx (HTTPS) should face the
   network. Do not set `listenAddress = "0.0.0.0"` unless you accept serving the
@@ -56,7 +56,7 @@ SMTP_FROM=vault@example.com
 ```
 
 Because the vault database lives on a host bind-mount owned by a fixed uid, the
-service user needs a **stable numeric uid/gid**. That is why `uid`/`gid` are
+service user needs a stable numeric uid/gid. That is why `uid`/`gid` are
 plain integers rather than dynamically allocated -- the container runs as that
 numeric id and must match the on-disk ownership.
 
@@ -82,13 +82,26 @@ numeric id and must match the on-disk ownership.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `enable` | `false` | Turn the module on. |
-| `domain` | *(required)* | Public HTTPS domain; also passed to Vaultwarden as `DOMAIN`. |
-| `acmeHost` | *(required)* | Name of the `security.acme` cert to serve (`useACMEHost`). |
+| `domain` | (required) | Public HTTPS domain; also passed to Vaultwarden as `DOMAIN`. |
+| `acmeHost` | (required) | Name of the `security.acme` cert to serve (`useACMEHost`). |
 | `dataDir` | `/var/lib/vaultwarden` | Vault database + env file location on the host. |
 | `port` | `8222` | Loopback port the container binds and nginx proxies to. |
 | `listenAddress` | `127.0.0.1` | Address the container binds (`ROCKET_ADDRESS`). Loopback-only by default; see the warning below before changing it. |
 | `uid` / `gid` | `8222` | Stable numeric id owning `dataDir` and running the container. |
 | `signupsAllowed` | `false` | Whether open registration is permitted (`SIGNUPS_ALLOWED`). |
+| `package` | `pkgs.vaultwarden` | Build baked into the image. Override `dbBackend` for PostgreSQL/MySQL, add the `s3` cargo feature for `s3://` folders. |
+| `backend` | `podman` | OCI backend (`podman` or `docker`); the `runsc-host` runtime is registered with that daemon and the unit is `<backend>-vaultwarden`. |
+| `rsaKeyFile` | `null` | Host path of a PEM RSA key that signs login JWTs, mounted read-only. Instances sharing a database must share it. |
+| `environment` | `{ }` | Extra non-secret environment (e.g. `ATTACHMENTS_FOLDER`), overriding the module's own keys. |
+| `environmentFiles` | `[ ]` | Extra `KEY=value` files for secrets such as `DATABASE_URL`; each must exist at start. |
+
+## Several instances, one vault
+
+With `DATABASE_URL` on a shared PostgreSQL, `ATTACHMENTS_FOLDER`/`SENDS_FOLDER`
+on a shared S3 bucket and a shared `rsaKeyFile`, no state is left in `dataDir`
+but the icon cache and temp uploads, so two hosts can serve the same vault.
+Live-sync websocket notifications stay per instance: a client connected to one
+host learns about a change made through the other on its next sync.
 
 ## Caveats
 
@@ -97,7 +110,7 @@ numeric id and must match the on-disk ownership.
   itself, but it does not manage ACME accounts, DNS, or firewall (open 80/443 yourself).
 - gVisor adds a syscall-interception layer; there is a small runtime overhead
   and a few exotic syscalls behave differently. Vaultwarden works fine under it.
-- **`--network=host` bypasses gVisor's user-space network stack (netstack).**
+- `--network=host` bypasses gVisor's user-space network stack (netstack).
   The container shares the host network namespace, so gVisor's syscall
   sandboxing still applies but its network isolation dimension does not -- a
   network-facing compromise reaches the host network stack directly. This is a
@@ -106,4 +119,5 @@ numeric id and must match the on-disk ownership.
   map instead (at some compat cost).
 - If you already register a gVisor runtime elsewhere in your configuration,
   remove the runtime-registration block to avoid defining `runsc-host` twice.
-- Back up `dataDir` -- it holds the SQLite database and attachments.
+- Back up `dataDir` -- with the defaults it holds the SQLite database and
+  attachments.

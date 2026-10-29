@@ -84,7 +84,8 @@ in
             type = bool;
             default = true;
             description = ''
-              Pass lego's `--dns.propagation-disable-ans` to skip its built-in
+              Pass lego's `--dns.propagation.disable-ans` (the lego v5 spelling;
+              v4 called it `--dns.propagation-disable-ans`) to skip its built-in
               authoritative completion pre-check. Combined with a pinned
               `resolvers` list this is what keeps the propagation check from
               failing behind a local or split-horizon resolver. Leave enabled
@@ -110,7 +111,7 @@ in
     extraDomainNames = (lib.optional attrs.wildcard "*.${domain}") ++ attrs.extraDomainNames;
 
     extraLegoFlags =
-      (lib.optional attrs.disableCompletePropagationCheck "--dns.propagation-disable-ans")
+      (lib.optional attrs.disableCompletePropagationCheck "--dns.propagation.disable-ans")
       ++ (lib.optional (
         attrs.resolvers != [ ]
       ) "--dns.resolvers=${lib.concatStringsSep "," attrs.resolvers}")

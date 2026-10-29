@@ -1,6 +1,6 @@
 # mesh-overlay-address-identity
 
-Keep a declarative *name -> overlay address* map honest against the live mesh, and
+Keep a declarative name -> overlay address map honest against the live mesh, and
 repair the control plane when a node re-registers under a new address. Two tools --
 a pre-commit reconciler and a coordination-server surgery script -- because they are
 two halves of the same failure.
@@ -17,15 +17,15 @@ resolvers, `/etc/hosts`, ssh aliases, DERP maps, monitoring targets, firewall
 allowlists. So you write it down once -- a Nix file mapping machine name to
 address -- and derive all of that from it.
 
-That map is a *claim about the world*, and the world moves without asking:
+That map is a claim about the world, and the world moves without asking:
 
 - A machine gets reinstalled, its agent state is wiped, and it registers again with
-  a **fresh machine key**. The control plane keys nodes by machine key, so this is a
+  a fresh machine key. The control plane keys nodes by machine key, so this is a
   brand new node. The hostname collides with the old record, so the server
   disambiguates by suffixing the given-name: `builder` -> `builder-1`. You now have
-  **two rows for one machine**: an offline shadow squatting the canonical address,
+  two rows for one machine: an offline shadow squatting the canonical address,
   and the live node on a fresh address that nothing in your fleet points at.
-- Addresses get **recycled**. Delete a machine, enroll a phone six months later, and
+- Addresses get recycled. Delete a machine, enroll a phone six months later, and
   the phone can land on the retired machine's address -- which your ACLs still trust.
 - Someone enrolls a device and never touches the map. The map is now quietly
   incomplete, and stays that way until something breaks.
@@ -41,9 +41,9 @@ it exactly, in the headscale module:
 
 > `nixos/modules/services/networking/headscale.nix:143-155` --
 > `settings.prefixes.allocation`, default `"sequential"`:
-> *"sequential (default): assigns the next free IP from the previous given IP."*
+> "sequential (default): assigns the next free IP from the previous given IP."
 
-**From the previous given IP.** The allocator walks forward from the last address it
+From the previous given IP. The allocator walks forward from the last address it
 handed out; freed addresses behind that cursor are not revisited. Deleting a node
 does not put its address back at the front of the queue -- it hands the re-registering
 node the next never-used address, one higher than before. Re-registering can never
@@ -52,7 +52,7 @@ reclaim a canonical address; it can only burn another one.
 Nor is there a verb for it. The whole node surface of the 0.29 CLI is
 `approve-routes`, `backfillips`, `delete`, `expire`, `list`, `list-routes`,
 `rename`, `tag`. You can rename a node; you cannot place it. `backfillips` only
-fills in addresses that are *missing*, and it allocates them from the same
+fills in addresses that are missing, and it allocates them from the same
 forward-walking cursor, so it cannot be steered either.
 
 So the only way to put the live node back on the address the rest of the fleet pins
@@ -72,45 +72,45 @@ against the local agent's netmap. Four outcomes:
 | Live state | Verdict |
 | --- | --- |
 | address in map, name matches (or matches its alias) | pass |
-| address in map, **different name** | **block** -- address reuse or a rogue registration |
-| address unknown, name looks like `<known-name>-<n>` | **block** -- re-registration duplicate, prints the `mesh-node-reassociate` command to fix it |
+| address in map, different name | block -- address reuse or a rogue registration |
+| address unknown, name looks like `<known-name>-<n>` | block -- re-registration duplicate, prints the `mesh-node-reassociate` command to fix it |
 | address unknown, ordinary name | append to the map above the marker, `git add`, pass |
 
 ### Traps encoded in it
 
-- **Compare by address, not by name.** The dangerous case is one address held by an
+- Compare by address, not by name. The dangerous case is one address held by an
   unexpected name. A name-keyed comparison walks the map and asks "is this machine
   still at this address" -- it never sees the phone that inherited a retired
   machine's address, because that address is not missing, it is *occupied by someone
   else*. The check builds the reverse index and iterates over live nodes.
-- **Never block a commit because the network is down.** Missing agent, missing
+- Never block a commit because the network is down. Missing agent, missing
   `nix`, daemon down, unparseable JSON, timeout -> print one line and `exit 0`. A
   hook that fails offline gets deleted within a week, and then you have no check at
-  all. Only *disagreement* is fatal; *ignorance* is not.
-- **Absence is not drift.** Netmaps are ACL-scoped: a machine you are not allowed to
+  all. Only disagreement is fatal; ignorance is not.
+- Absence is not drift. Netmaps are ACL-scoped: a machine you are not allowed to
   talk to simply is not in your netmap. Map entries you cannot see are counted in a
   note, never flagged. This is why the check is one-directional.
-- **The `-1` suffix is the duplicate signature.** A live node named `<known>-<n>` on
+- The `-1` suffix is the duplicate signature. A live node named `<known>-<n>` on
   an address that is not in the map is not a new device -- it is a machine you already
   track, back with a fresh key. Auto-adding it would enshrine the wrong address in
   the map and leave the canonical one stranded forever. It blocks instead and prints
   the exact re-association command. (Consequence: a genuinely new device whose name
   ends in `-<n>` and shares a base with a tracked machine must be added to the map by
   hand. That is the intended trade.)
-- **The marker is an ordering constraint, not decoration.** Auto-added entries are
-  inserted on the line *above* the marker comment, so the marker must be the last
+- The marker is an ordering constraint, not decoration. Auto-added entries are
+  inserted on the line above the marker comment, so the marker must be the last
   line of the block new devices belong in. Without a marker the tool refuses to guess
   and prints the entries for you to place. Insert-above also keeps the block's
   closing brace intact without parsing Nix.
-- **Refuse to auto-edit a dirty map file.** `git add <file>` stages the *whole* file.
+- Refuse to auto-edit a dirty map file. `git add <file>` stages the whole file.
   If the map already has unstaged edits, appending and staging would sweep the
   author's half-finished work into this commit. When the file is dirty the tool
   reports the missing devices and blocks instead of touching it.
-- **Evaluate the map, don't parse it.** It reads the map with `nix eval --json -f`,
+- Evaluate the map, don't parse it. It reads the map with `nix eval --json -f`,
   so the map may be `rec`, may compose sub-attrsets, may derive entries from other
   files -- the check sees the same values your modules see, not a regex's guess. The
   price is a dependency on `nix` being on `PATH`, which is a skip, not a failure.
-- **Use the DNS label, not `HostName`.** `HostName` is what the machine calls itself
+- Use the DNS label, not `HostName`. `HostName` is what the machine calls itself
   locally and drifts independently of the control plane. The first label of `DNSName`
   is the given-name the control plane actually serves -- that is what your ACLs and
   MagicDNS resolve, so that is what the map must agree with. Comparison is
@@ -134,37 +134,37 @@ the node table.
 
 ### Traps encoded in it
 
-- **Editing a live database is the whole risk.** The sequence is fixed: verify the
-  schema -> resolve exactly one source node -> refuse ambiguity -> **stop the service**
+- Editing a live database is the whole risk. The sequence is fixed: verify the
+  schema -> resolve exactly one source node -> refuse ambiguity -> stop the service
   -> snapshot -> single `BEGIN IMMEDIATE` transaction -> start -> health-poll -> post-check
   -> only then touch the node. Nothing is written while the server is running: it
   caches state in memory and would happily overwrite your edit on its next flush.
-- **Snapshot *after* the stop, and use `.backup`.** `cp` of the main database file
+- Snapshot after the stop, and use `.backup`. `cp` of the main database file
   while the server is running misses everything still in the `-wal` sidecar, so the
   "backup" can be a state that never existed. `sqlite3 .backup` after the service is
   stopped is a consistent snapshot, and its path is printed in every failure message.
-- **Refuse an unknown schema.** Before anything else it checks that `nodes` has
+- Refuse an unknown schema. Before anything else it checks that `nodes` has
   `id`, `given_name`, `ipv4`, `ipv6`. Older coordination servers stored addresses
   serialised in a single column under a different table name; on those, a blind
   `UPDATE ... SET ipv4` writes a column that does not exist (or, worse, exists with
   different semantics). Fail loudly with the column list instead.
-- **Constrain the target address.** `addressPrefixes` restricts what `--to-ip` will
+- Constrain the target address. `addressPrefixes` restricts what `--to-ip` will
   accept. A typo outside the overlay range is accepted by sqlite without complaint
   and then served to every client in the netmap.
-- **Fail closed on a conflict.** If another row holds the target address or name, the
+- Fail closed on a conflict. If another row holds the target address or name, the
   tool stops and describes it; you must pass `--delete-conflict` to remove the shadow.
   Two rows sharing an address is a state the coordination server does not expect.
-- **`--steal-ipv6` exists for a reason.** IPv6 is allocated from the same monotonic
+- `--steal-ipv6` exists for a reason. IPv6 is allocated from the same monotonic
   cursor, so the shadow record is holding the canonical v6 address too. Moving only
   the v4 address leaves the node with a v6 nobody references. Take both.
-- **Post-check the invariant.** After restart it re-counts holders of the target
+- Post-check the invariant. After restart it re-counts holders of the target
   address and aborts (pointing at the backup) unless it is exactly one.
-- **The node does not notice.** The client keeps using its old address until its next
+- The node does not notice. The client keeps using its old address until its next
   netmap poll. `--node-ssh` restarts the agent over ssh to force it; without it the
   tool tells you the address will be adopted eventually. If the node in question is
-  reachable *only* over the mesh, expect to bounce it out-of-band -- you have just
+  reachable only over the mesh, expect to bounce it out-of-band -- you have just
   changed the address you were reaching it on.
-- **All SQL selectors are validated, not bound.** sqlite3 CLI takes no bind
+- All SQL selectors are validated, not bound. sqlite3 CLI takes no bind
   parameters, so names and addresses are interpolated into SQL text. Every selector
   (`--from-name` included, not just the write side) is validated against a strict
   character class first.
@@ -280,7 +280,7 @@ alias must name a machine that exists in `addresses`.
 - `mesh-node-reassociate` needs root on the coordination host and briefly stops the
   coordination service. Existing WireGuard sessions survive that; new registrations
   and netmap updates pause for a second or two.
-- The checker only sees what *this* machine's netmap shows. Run it where your netmap
+- The checker only sees what this machine's netmap shows. Run it where your netmap
   is widest, and cross-check against the coordination server's node list when a
   result surprises you.
 - The `-<n>` duplicate heuristic matches the disambiguation suffix scheme used by

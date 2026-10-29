@@ -1,7 +1,7 @@
 # blackbox-endpoint-probes
 
 A NixOS module that bundles the [blackbox exporter](https://github.com/prometheus/blackbox_exporter)
-with the Prometheus scrape job that drives it, so **one `targets` list** configures
+with the Prometheus scrape job that drives it, so one `targets` list configures
 both. Each target becomes an external "is this endpoint actually answering?" probe
 emitting `probe_success{service=<name>}` (0/1) and `probe_duration_seconds{service=<name>}`.
 
@@ -9,9 +9,9 @@ emitting `probe_success{service=<name>}` (0/1) and `probe_duration_seconds{servi
 
 Blackbox probing on Prometheus is deceptively fiddly. You have to:
 
-1. Run the exporter with a set of probe *modules* (`http_2xx`, `tcp_connect`, ...).
-2. Write a scrape job that does **not** scrape your target URLs directly, but
-   instead scrapes the *exporter's* `/probe` endpoint with the target passed as a
+1. Run the exporter with a set of probe modules (`http_2xx`, `tcp_connect`, ...).
+2. Write a scrape job that does not scrape your target URLs directly, but
+   instead scrapes the exporter's `/probe` endpoint with the target passed as a
    query param.
 
 That second step needs a specific relabel dance, and the default HTTP module has a
@@ -24,12 +24,12 @@ target list is all you write.
 
 The upstream-flavored `http_2xx` module used here lists 4xx codes
 (`400 401 403 404`) in `valid_status_codes`. So a probe against a URL that returns
-**404 still reports `probe_success=1`**. It only fails on connection refused, TLS
+404 still reports `probe_success=1`. It only fails on connection refused, TLS
 errors, or timeout -- it's a "the server is up and routing" check, not a
 "this endpoint works" check.
 
 If you want a 404 (or any non-2xx) to page, put the target on the
-**`http_strict_2xx`** module, whose `valid_status_codes = [ ]` means "real 2xx
+`http_strict_2xx` module, whose `valid_status_codes = [ ]` means "real 2xx
 only". Choosing the wrong module here is the difference between a monitor that
 catches an outage and one that silently passes while your app 500s.
 
@@ -43,7 +43,7 @@ To scrape blackbox you must rewrite the scrape target. The relabel chain:
 1. copy the target (`__address__`) into `__param_target`,
 2. copy the module meta-label into `__param_module`,
 3. keep the original URL as the `instance` label (so it reads sensibly in graphs),
-4. **rewrite `__address__` to the exporter itself**, turning the actual request
+4. rewrite `__address__` to the exporter itself, turning the actual request
    into `http://<exporter>/probe?target=<url>&module=<module>`.
 
 Skip step 4 and Prometheus tries to scrape your target URLs directly (as if they
@@ -108,7 +108,7 @@ widening if you want the type checker to accept a new module name.
 
 ## Caveats
 
-- **Requires an existing Prometheus.** This module appends to
+- Requires an existing Prometheus. This module appends to
   `services.prometheus.scrapeConfigs`; it does not enable Prometheus itself.
 - The exporter binds to loopback by default. If Prometheus runs on another host,
   point `listenAddress` at a reachable interface (and firewall the port).

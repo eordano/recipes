@@ -126,6 +126,16 @@ in
       default = [ ];
     };
 
+    scrapeJob = mkOption {
+      type = types.attrs;
+      readOnly = true;
+      description = ''
+        The generated probe scrape job as a raw `scrape_configs` entry. It feeds
+        `services.prometheus.scrapeConfigs`; a receiver that scrapes with
+        something else, such as VictoriaMetrics, reuses it from here.
+      '';
+    };
+
     modules = mkOption {
       type = types.attrs;
       default = defaultModules;
@@ -143,43 +153,43 @@ in
       };
     };
 
-    services.prometheus.scrapeConfigs = [
-      {
-        job_name = "blackbox";
-        scrape_interval = cfg.probeInterval;
-        scrape_timeout = cfg.probeTimeout;
-        metrics_path = "/probe";
+    services.blackboxEndpointProbes.scrapeJob = {
+      job_name = "blackbox";
+      scrape_interval = cfg.probeInterval;
+      scrape_timeout = cfg.probeTimeout;
+      metrics_path = "/probe";
 
-        static_configs = map (m: {
-          labels.__blackbox_module = m;
-          targets = map (t: t.url) (filter (t: t.module == m) cfg.targets);
-        }) (lib.unique (map (t: t.module) cfg.targets));
+      static_configs = map (m: {
+        labels.__blackbox_module = m;
+        targets = map (t: t.url) (filter (t: t.module == m) cfg.targets);
+      }) (lib.unique (map (t: t.module) cfg.targets));
 
-        relabel_configs = [
-          {
-            source_labels = [ "__address__" ];
-            target_label = "__param_target";
-          }
-          {
-            source_labels = [ "__blackbox_module" ];
-            target_label = "__param_module";
-          }
-          {
-            source_labels = [ "__param_target" ];
-            target_label = "instance";
-          }
-          {
-            target_label = "__address__";
-            replacement = "${cfg.listenAddress}:${toString cfg.port}";
-          }
-        ]
-        ++ (map (t: {
+      relabel_configs = [
+        {
+          source_labels = [ "__address__" ];
+          target_label = "__param_target";
+        }
+        {
+          source_labels = [ "__blackbox_module" ];
+          target_label = "__param_module";
+        }
+        {
           source_labels = [ "__param_target" ];
-          regex = lib.escapeRegex t.url;
-          target_label = "service";
-          replacement = t.service;
-        }) cfg.targets);
-      }
-    ];
+          target_label = "instance";
+        }
+        {
+          target_label = "__address__";
+          replacement = "${cfg.listenAddress}:${toString cfg.port}";
+        }
+      ]
+      ++ (map (t: {
+        source_labels = [ "__param_target" ];
+        regex = lib.escapeRegex t.url;
+        target_label = "service";
+        replacement = t.service;
+      }) cfg.targets);
+    };
+
+    services.prometheus.scrapeConfigs = [ cfg.scrapeJob ];
   };
 }

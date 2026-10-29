@@ -2,7 +2,7 @@
 
 A thin, top-level `home.*` namespace that any NixOS module can contribute to,
 forwarded into one or more Home Manager users -- so modules never have to know
-*which* user owns the Home Manager config.
+which user owns the Home Manager config.
 
 ## The problem
 
@@ -15,7 +15,7 @@ through as an argument (and pollute every module signature).
 
 ## The insight
 
-Declare a **host-neutral top-level namespace** -- `home.file`, `home.activation`,
+Declare a host-neutral top-level namespace -- `home.file`, `home.activation`,
 `home.env`, `home.programs`, `home.services` -- that modules write to freely:
 
 ```nix
@@ -31,14 +31,14 @@ home-manager.users.<name>.home.file =
   lib.mkAliasDefinitions options.home.file;
 ```
 
-`mkAliasDefinitions` forwards the *definitions* of one option onto another,
+`mkAliasDefinitions` forwards the definitions of one option onto another,
 preserving each contributor's priority (`mkForce`, `mkDefault`, `mkIf`, ...)
 instead of collapsing everything to a single merged value. That means N modules
 can each add to `home.file` and their overrides still resolve correctly on the
 far side. The username is decided in exactly one place (this module's
 `users` option); everything else stays generic.
 
-Using `lib.genAttrs users mkUser`, the *same* aliased definitions land in every
+Using `lib.genAttrs users mkUser`, the same aliased definitions land in every
 managed user, so one `home.file....` set anywhere applies to all of them.
 
 ## What else it bundles
@@ -46,39 +46,39 @@ managed user, so one `home.file....` set anywhere applies to all of them.
 Two small conveniences that pair naturally with a workstation HM setup, both
 individually toggleable:
 
-- **Nightly `nix-index` rebuild.** Keeps the `nix-locate` /
+- Nightly `nix-index` rebuild. Keeps the `nix-locate` /
   command-not-found database fresh. It runs as a `oneshot` at `Nice 19` with
   `IOSchedulingClass = idle`, so it never competes with foreground work, and
   the timer is `Persistent` with a 30-minute `RandomizedDelaySec` so a machine
   that was off at the scheduled time still catches up (and a fleet doesn't all
   fire at once).
 
-- **XDG user-dirs archive redirect.** Points Desktop / Downloads / Pictures /
+- XDG user-dirs archive redirect. Points Desktop / Downloads / Pictures /
   Videos into an `archive/` subtree to keep `$HOME` uncluttered, while
   Documents / Music / Templates collapse back to `$HOME`.
 
 ## Traps worth knowing
 
-- **`user-dirs.conf` with `enabled=False`.** Without it, the
+- `user-dirs.conf` with `enabled=False`. Without it, the
   `xdg-user-dirs-update` daemon rewrites your carefully redirected paths back to
   defaults on the next login. This line disables that daemon so the declarative
   paths stick.
 
-- **`createDirectories = false`.** HM would otherwise materialise empty
+- `createDirectories = false`. HM would otherwise materialise empty
   `Desktop/`, `Templates/`, etc. that you never asked for.
 
-- **`nix-index` needs `HOME` set.** The rebuild writes
+- `nix-index` needs `HOME` set. The rebuild writes
   `~/.cache/nix-index/files`; a systemd service has no `HOME` unless you set
   one, so the `nixIndex.home` option feeds it explicitly (defaults to
   `/home/<user>`).
 
-- **`nix-index` wants the network.** The rebuild fetches store metadata, hence
+- `nix-index` wants the network. The rebuild fetches store metadata, hence
   the `network-online.target` ordering. On an offline box the timer simply
   fails and retries next cycle.
 
-- **This module does not import home-manager.** It assumes the Home Manager
+- This module does not import home-manager. It assumes the Home Manager
   NixOS module is already imported by your configuration (via its flake input or
-  channel). It only *populates* `home-manager.users`.
+  channel). It only populates `home-manager.users`.
 
 ## Usage
 

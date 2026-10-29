@@ -10,12 +10,12 @@ There is no native nixpkgs service for Jaeger, so it runs as a container. A
 tracing backend has two very different network surfaces, and treating them the
 same gets you either a broken UI or an open door:
 
-- **The UI (port 16686)** is a web app. It wants TLS and a domain, so it goes
+- The UI (port 16686) is a web app. It wants TLS and a domain, so it goes
   through nginx like any other web service. Its container port is published on
-  `127.0.0.1`, so it is reachable **only** through the nginx TLS vhost -- never
+  `127.0.0.1`, so it is reachable only through the nginx TLS vhost -- never
   as raw plaintext HTTP on an external interface.
-- **The OTLP ingest ports (4317 gRPC, 4318 HTTP)** are where your services push
-  spans. They are *unauthenticated*. Proxying them through nginx buys nothing
+- The OTLP ingest ports (4317 gRPC, 4318 HTTP) are where your services push
+  spans. They are unauthenticated. Proxying them through nginx buys nothing
   and adds latency; what they need is to be reachable **only from your
   collectors** -- a VPN, a private subnet, a trusted interface -- never the public
   internet. They are published on `otlpListenAddress`, which defaults to
@@ -24,28 +24,28 @@ same gets you either a broken UI or an open door:
 So the module deliberately splits the surface: nginx proxies the UI only, and
 the OTLP ports are published on a bind address you control.
 
-> **Docker bypasses the NixOS firewall.** Docker publishes container ports with
+> Docker bypasses the NixOS firewall. Docker publishes container ports with
 > a DNAT rule in the `DOCKER` iptables chain that skips the
 > `networking.firewall` INPUT chain. So what actually determines exposure is the
-> *publish bind address* (`127.0.0.1` for the UI, `otlpListenAddress` for OTLP),
-> **not** `openFirewall`. A `0.0.0.0` bind is reachable on every interface
+> publish bind address (`127.0.0.1` for the UI, `otlpListenAddress` for OTLP),
+> not `openFirewall`. A `0.0.0.0` bind is reachable on every interface
 > regardless of the firewall toggle. This is why the defaults bind to loopback.
 
 ## The traps this encodes
 
-1. **The docker network must be created before the container starts.** The
+1. The docker network must be created before the container starts. The
    container joins a named docker network. NixOS's generated `docker-jaeger`
    unit has no idea that network needs to exist first, so a `docker-network-jaeger`
    oneshot (`Type = "oneshot"`, `RemainAfterExit = true`) creates the network
    and is ordered `before` the container, which `requires` it. Drop the
    ordering and, on boot, the container comes up attached to nothing.
 
-2. **Enabling without a UI domain fails eval, on purpose.** `domain` is asserted
+2. Enabling without a UI domain fails eval, on purpose. `domain` is asserted
    non-null. Without the assertion, forgetting to set it would silently leave
    the UI with no nginx vhost -- reachable only on loopback -- with no error to
    tell you why.
 
-3. **The OTLP ports are unauthenticated.** They default to a loopback bind
+3. The OTLP ports are unauthenticated. They default to a loopback bind
    (`otlpListenAddress = "127.0.0.1"`), so out of the box nothing off-host can
    reach them. To let remote collectors in, set `otlpListenAddress` to a
    trusted-network interface address (VPN / private subnet). Because Docker's
@@ -86,7 +86,7 @@ exporters at that address.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `enable` | `false` | Turn the module on. |
-| `domain` | `null` | UI vhost domain. **Required** (asserted non-null). |
+| `domain` | `null` | UI vhost domain. Required (asserted non-null). |
 | `acmeHost` | `null` | ACME host whose cert the vhost reuses (`useACMEHost`); `null` to manage TLS elsewhere. |
 | `image` | `jaegertracing/all-in-one:latest` | OCI image reference. |
 | `imageFile` | `null` | Pre-built image tarball (e.g. a pinned `dockerTools.pullImage`) to load instead of pulling `image`. |

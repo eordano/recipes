@@ -32,22 +32,19 @@ let
     doCheck = false;
   };
 
-  phonemizer-fork = python3Packages.buildPythonPackage rec {
-    pname = "phonemizer-fork";
-    version = "3.3.2";
+  phonemizer = python3Packages.buildPythonPackage rec {
+    pname = "phonemizer";
+    version = "3.4.0";
     pyproject = true;
     src = python3Packages.fetchPypi {
-      pname = "phonemizer_fork";
-      inherit version;
-      hash = "sha256-EOFugn0EQ7CHBi4htV6AXACYnPE0Oy6B5zTK5fbAz2k=";
+      inherit pname version;
+      hash = "sha256-4TIxmAxQvGcewEZjeboCcmCtnWGSmVLYrpZls9DyUes=";
     };
-    build-system = [ python3Packages.hatchling ];
+    build-system = [ python3Packages.setuptools ];
     dependencies = with python3Packages; [
-      espeakng-loader
       attrs
       dlinfo
       joblib
-      segments
       typing-extensions
     ];
     doCheck = false;
@@ -55,21 +52,22 @@ let
 in
 python3Packages.buildPythonPackage rec {
   pname = "kokoro-onnx";
-  version = "0.5.0";
+  version = "0.6.1";
   pyproject = true;
 
   src = python3Packages.fetchPypi {
     pname = "kokoro_onnx";
     inherit version;
-    hash = "sha256-W+sV8IXigo7Y1JP3ksB5r4VxA6stzqoeESsXYFh6yWo=";
+    hash = "sha256-e722bdU3dfcQiKmZmamu/a0kB0Da9UywlBDYux4pTjU=";
   };
 
   build-system = [ python3Packages.hatchling ];
 
   dependencies = with python3Packages; [
+    espeakng-loader
     numpy
     onnxruntime
-    phonemizer-fork
+    phonemizer
   ];
 
   doCheck = false;

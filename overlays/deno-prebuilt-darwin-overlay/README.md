@@ -61,7 +61,7 @@ fixed-output derivation, so both go stale on every deno release.
 
 ## Caveats
 
-- **Both darwin arches are wired up**, but only the Apple Silicon
+- Both darwin arches are wired up, but only the Apple Silicon
   (`aarch64-apple-darwin`) hash is filled in with a real value out of the
   box. The Intel (`x86_64-apple-darwin`) entry ships as `lib.fakeHash` -- fill
   it in (see above) before building on an Intel Mac, otherwise that build

@@ -5,6 +5,7 @@
   setuptools,
   wheel,
   litellm,
+  cloudpickle,
   datasets,
   mlflow,
   wandb,
@@ -13,19 +14,19 @@
 
 buildPythonPackage rec {
   pname = "gepa";
-  version = "0.1.0";
+  version = "0.1.4";
   pyproject = true;
 
   src = fetchFromGitHub {
     owner = "gepa-ai";
     repo = "gepa";
     tag = "v${version}";
-    hash = "sha256-W0wW7dV8jMgeem8HjBYxcaL1VA9zBwMbePqLSsQe8qQ=";
+    hash = "sha256-s9/Vjzd5/JFuMgT9huiURu6I8qlxsRagi4h6v+75IxM=";
   };
 
   postPatch = ''
     substituteInPlace pyproject.toml \
-      --replace-fail 'version="0.0.27"' 'version="${version}"'
+      --replace-fail 'version="0.1.3"' 'version="${version}"'
   '';
 
   build-system = [
@@ -36,16 +37,13 @@ buildPythonPackage rec {
   optional-dependencies = {
     full = [
       litellm
+      tqdm
+      cloudpickle
       datasets
       mlflow
       wandb
-      tqdm
     ];
-    dspy = [
-      litellm
-      datasets
-      tqdm
-    ];
+    dspy = [ ];
   };
 
   pythonImportsCheck = [

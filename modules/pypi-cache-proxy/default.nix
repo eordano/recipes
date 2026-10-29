@@ -17,12 +17,12 @@ let
       ps.gunicorn
       (ps.buildPythonPackage rec {
         pname = "proxpi";
-        version = "1.2.0";
+        version = "1.3.1";
         pyproject = true;
 
         src = pkgs.fetchPypi {
           inherit pname version;
-          sha256 = "sha256-7Z4NdBJrQK9cd4ZDTLSYfjsw4YNnio9hvUptamUzrjY=";
+          sha256 = "sha256-GmekiXYBLJZcl77iM8Zg6xVKmmBGHKxso431fPMJ6nY=";
         };
 
         build-system = with ps; [

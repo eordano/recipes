@@ -150,7 +150,7 @@ in
 
     image = mkOption {
       type = types.str;
-      default = "ghcr.io/open-webui/open-webui:v0.10.2@sha256:9fcea9c6e32ab60b0498f3986c6cdf651ddbe61db48d2213a3d28048ddd673d4";
+      default = "ghcr.io/open-webui/open-webui:v0.11.4@sha256:9591b13f13843c7721c2b8eaf7382846c81b3ffe126526d1888d1fed50c6a33f";
       description = ''
         OCI image reference used when deploymentMethod is 'docker'. The default
         is pinned to a released version by digest so a redeploy can never

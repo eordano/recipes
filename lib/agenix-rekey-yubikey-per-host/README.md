@@ -12,21 +12,21 @@ identities* (the keys a human uses to edit/rekey) and rekeyed per host to each
 host's own key. When your master identities are hardware YubiKeys, you also
 want:
 
-- an **offline backup identity** in case the YubiKeys are lost -- but the backup
+- an offline backup identity in case the YubiKeys are lost -- but the backup
   identity itself should be encrypted at rest, and
-- **recovery recipients** so every secret can also be opened another way,
+- recovery recipients so every secret can also be opened another way,
 
 ...without pinning a recipient a host can't yet use during bootstrap. Those
 requirements collide in a few non-obvious ways.
 
 ## The key insights / traps
 
-1. **Inline the encrypted backup identity's pubkey.**
+1. Inline the encrypted backup identity's pubkey.
    A normal master identity is a plaintext `.pub` file, so agenix reads the
    recipient's public key straight from it. But if you keep the backup identity
-   *encrypted at rest* (an `age`-encrypted `.age` file), agenix can't read a
+   encrypted at rest (an `age`-encrypted `.age` file), agenix can't read a
    pubkey out of it without decrypting it first -- which defeats the point of an
-   offline, seldom-unlocked backup. The fix is to give the pubkey **inline**
+   offline, seldom-unlocked backup. The fix is to give the pubkey inline
    next to the encrypted identity:
 
    ```nix
@@ -39,7 +39,7 @@ requirements collide in a few non-obvious ways.
    Now agenix can select the backup as a recipient at rekey time while the
    private identity stays sealed.
 
-2. **Omit `hostPubkey` for hosts that can't decrypt yet.**
+2. Omit `hostPubkey` for hosts that can't decrypt yet.
    During install / first boot, a host has no age key of its own. If you pin a
    `hostPubkey` for it anyway, rekey encrypts secrets to a recipient that host
    cannot open -- a footgun that "works" until you actually try to boot it. Pass
@@ -47,12 +47,12 @@ requirements collide in a few non-obvious ways.
    out; the host still gets secrets via the master + recovery recipients until
    it has a key. Fill in the real pubkey once the host can decrypt.
 
-3. **`extraEncryptionPubkeys` are recovery recipients on *every* secret.**
+3. `extraEncryptionPubkeys` are recovery recipients on every secret.
    These are added on top of the masters, so any secret can also be opened with,
    e.g., a YubiKey SSH recipient or an offline root-recovery key. This is your
    break-glass path if the primary identities are unavailable.
 
-4. **`hostPubkey` accepts an age *or* ssh public key.**
+4. `hostPubkey` accepts an age or ssh public key.
    Pass the host's own key as `age1...`, as `ssh-ed25519 AAAA...`, or as a Nix
    path to a file holding one -- agenix-rekey takes any of those. Just be
    consistent per host.
@@ -101,14 +101,14 @@ Import each `ageWith name pubkey` result as a NixOS module for that host.
 | `keysDir` | -- | Nix path to the directory holding all master/recovery key files. |
 | `secretsRoot` | -- | Nix path to the repo root under which per-host ciphertext lives. |
 | `yubikeyIdentities` | `[]` | Plaintext `.pub` master identity filenames (relative to `keysDir`). |
-| `backupIdentity` | `null` | `{ identity; pubkey; }` for an *encrypted* backup identity with its pubkey inlined. |
+| `backupIdentity` | `null` | `{ identity; pubkey; }` for an encrypted backup identity with its pubkey inlined. |
 | `recoveryPubkeys` | `[]` | Extra recipient `.pub` filenames added to every secret. |
 | `perHostSubdir` | `"/secrets/per-host"` | Sub-path (under `secretsRoot`) for per-host rekeyed ciphertext; `<name>` is appended. |
 | `generatedSecretsDir` | `secretsRoot + "/secrets/generated"` | Where generated secrets are written. |
 
 ## Caveats
 
-- `storageMode = "local"` keeps rekeyed ciphertexts **in the repo**
+- `storageMode = "local"` keeps rekeyed ciphertexts in the repo
   (`secrets/per-host/<name>`), not out of tree. That directory must be
   writable in your working tree when you rekey.
 - Everything except `hostPubkey` is fleet-wide and identical across hosts -- the

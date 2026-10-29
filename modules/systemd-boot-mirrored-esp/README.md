@@ -18,7 +18,7 @@ nixpkgs' GRUB module has `boot.loader.grub.mirroredBoots`
 (`nixos/modules/system/boot/loader/grub/grub.nix:276`) -- a list of
 `{ path, devices }` pairs, and the installer walks it and installs to every one.
 
-The systemd-boot module has **no equivalent**. It writes exactly one `$BOOT`:
+The systemd-boot module has no equivalent. It writes exactly one `$BOOT`:
 
 ```nix
 bootMountPoint =
@@ -27,8 +27,8 @@ bootMountPoint =
 
 (`nixos/modules/system/boot/loader/systemd-boot/systemd-boot.nix:65`.) One
 mount point, one partition. If that NVMe dies, the machine does not boot, no
-matter how well mirrored the root pool is. Mirroring the *pool* and forgetting
-the *ESP* is the single most common gap in a "redundant" two-disk NixOS box:
+matter how well mirrored the root pool is. Mirroring the pool and forgetting
+the ESP is the single most common gap in a "redundant" two-disk NixOS box:
 `zroot` survives, and the firmware has nothing to load.
 
 ### 2. `configurationLimit` deletes the recovery kernel
@@ -39,7 +39,7 @@ reading the upstream code rather than trusting a summary.
 `boot.loader.systemd-boot.configurationLimit` is documented as "maximum number
 of latest generations in the boot menu"
 (`nixos/modules/system/boot/loader/systemd-boot/systemd-boot.nix:234`). It
-sounds like a *display* limit. It is not. It is fed straight into the installer:
+sounds like a display limit. It is not. It is fed straight into the installer:
 
 ```python
 CONFIGURATION_LIMIT = int("@configurationLimit@")
@@ -63,13 +63,13 @@ def garbage_collect(gc_roots: BootFileList) -> None:
 ```
 
 (`systemd-boot-builder.py:623`.) It `scandir`s `$BOOT/EFI/nixos` and deletes
-**every file there that is not owned by one of the last N generations**. Not
+every file there that is not owned by one of the last N generations. Not
 "files it wrote". Not "files matching a pattern". Every file.
 
 So the obvious way to build a recovery entry -- boot into a known-good
 generation, note its kernel and initrd under `EFI/nixos/`, hand-write a
 `.conf` pointing at them -- produces an entry that works today, works after the
-next deploy, and is **dangling by the sixth deploy**, with
+next deploy, and is dangling by the sixth deploy, with
 `configurationLimit = 5`. The failure mode is precisely inverted from what you
 want: the recovery entry is present in the menu right up until you have done
 enough deploys to actually need it, and then selecting it drops you at
@@ -80,18 +80,18 @@ green.
 
 ### 3. And `nix-collect-garbage` deletes the source
 
-The reflex fix is `boot.loader.systemd-boot.extraFiles`, which *is* re-copied
+The reflex fix is `boot.loader.systemd-boot.extraFiles`, which is re-copied
 after garbage collection (see Trap 3 below for the exact ordering). It does not
 solve this problem, because its type is `types.attrsOf types.path`
 (`systemd-boot.nix:392`) -- it can only pin something Nix can evaluate to a store
-path. The kernel of a *past* generation is a store path you would have to write
+path. The kernel of a past generation is a store path you would have to write
 literally into the config, and a literal `/nix/store/...` string carries no
 string context, so nothing roots it and `nix-collect-garbage -d` deletes it. The
 next deploy then fails in `install -Dp` with `No such file or directory`, in the
 middle of bootloader installation, on a system whose ESP has already been
 garbage collected.
 
-The recovery payload has to survive **two independent garbage collectors** --
+The recovery payload has to survive two independent garbage collectors --
 the ESP's and the Nix store's -- plus a store wipe and a reinstall. The only
 place that satisfies all of those is a plain directory on persistent storage,
 outside the store and outside the ESP.
@@ -109,13 +109,13 @@ for e in os.scandir(BOOT_MOUNT_POINT / "loader" / "entries"):
         delete_path(e)
 ```
 
-(`systemd-boot-builder.py:633-636`.) Entries that *do not* match are left
+(`systemd-boot-builder.py:633-636`.) Entries that do not match are left
 alone -- that is what makes a hand-placed recovery entry survivable at all. But
 the natural name for a recovery entry is something like
 `nixos-recovery.conf`, which matches `nixos-.+\.conf` exactly, is not in the
 keep set, and is therefore deleted on every single install.
 
-This module hard-**asserts** against it:
+This module hard-asserts against it:
 
 ```
 boot.mirroredEsp.recovery.entryFiles must not match nixos-*.conf
@@ -148,7 +148,7 @@ builder has completely finished. Inside that builder the order is:
 5. `run([COPY_EXTRA_FILES])` -- re-copy them
 
 (`systemd-boot-builder.py:589-596`.) Anything that wants to place a file on the
-ESP and have it *stay* must run after step 5. `extraInstallCommands` is the only
+ESP and have it stay must run after step 5. `extraInstallCommands` is the only
 NixOS-level hook that does. This module emits exactly one block there:
 
 ```sh
@@ -165,37 +165,37 @@ fi
 ```
 
 The restore is unconditional-per-deploy, not one-shot: it re-lays the files
-after *every* garbage collection, so the pin is re-established as fast as it is
+after every garbage collection, so the pin is re-established as fast as it is
 broken.
 
 ### Trap 3 -- the mirror must be the LAST statement, and it must `--delete`
 
 Order matters twice over:
 
-- The `rsync` runs **after** the recovery restore. Reverse the two and the
+- The `rsync` runs after the recovery restore. Reverse the two and the
   mirror ESP is a snapshot taken one instant before the recovery entry is put
   back -- permanently missing exactly the entry you built the second disk for.
-- `--delete` is not optional. Without it the mirror is a *union* of every
+- `--delete` is not optional. Without it the mirror is a union of every
   generation ever installed: it grows monotonically, fills a 1 GiB FAT
   partition, and from then on rsync fails mid-copy and the mirror silently
   diverges from the primary. A mirror you cannot trust is worse than none,
   because you will try to boot it.
 
 The trailing slashes are load-bearing: `rsync -a src/ dst/` copies the
-*contents* of `src`; `rsync -a src dst/` creates `dst/src`. The module always
+contents of `src`; `rsync -a src dst/` creates `dst/src`. The module always
 emits both slashes.
 
 ### Trap 4 -- `mountpoint -q`, never `test -d`
 
 The ZFS barrier polls with `mountpoint -q`, which reads the mount table. The
 obvious alternative, `test -d /data`, is worse than useless: when a pool fails
-to import, the mountpoint directory *still exists* on the underlying root
+to import, the mountpoint directory still exists on the underlying root
 filesystem, empty. `test -d` succeeds, the barrier reports green, and every
 consumer starts writing into the root filesystem at a path that is supposed to
 be a 40 TB pool.
 
 Then the pool imports late and ZFS mounts over the top. ZFS's `overlay`
-property defaults to **on**, so the mount does *not* fail with "directory not
+property defaults to on, so the mount does not fail with "directory not
 empty" -- it succeeds and silently shadows everything that was written
 underneath. The data is not lost, exactly; it is invisible, on the wrong
 filesystem, filling the root pool, and it reappears the next time the data pool
@@ -210,7 +210,7 @@ requires = barrier.importUnits;
 
 Both, always. `requires` alone pulls the import service into the transaction but
 imposes no ordering, so the barrier can run first and burn all its retries while
-the import has not started. `after` alone orders correctly but only *if* the
+the import has not started. `after` alone orders correctly but only if the
 import is in the same transaction -- if nothing pulled it in, `After=` on an
 inactive unit is a no-op and the barrier is ordered after nothing.
 
@@ -225,7 +225,7 @@ The reflex is `RequiresMountsFor=/data`, or `after = [ "data.mount" ]`. Neither
 exists for a natively-mounted ZFS dataset.
 
 Datasets with `mountpoint=legacy` get a real `fileSystems` entry and therefore a
-real systemd `.mount` unit. Datasets with a *native* `mountpoint=/data` are
+real systemd `.mount` unit. Datasets with a native `mountpoint=/data` are
 mounted by `zfs-mount.service`
 (`nixos/modules/tasks/filesystems/zfs.nix:945`), a single oneshot that runs
 `zfs mount -a` for everything at once. systemd has no per-dataset unit to bind
@@ -243,7 +243,7 @@ unit instead of hanging boot forever.
 
 That is deliberate. A host must be deployable before its recovery payload has
 been staged -- otherwise the very first deploy of a new machine is blocked on a
-chicken-and-egg problem. But it also means a *disappeared* payload is silent,
+chicken-and-egg problem. But it also means a disappeared payload is silent,
 and the most likely way for it to disappear is that it lives on a dataset that
 did not mount. `[ -d /data/boot-recovery ]` is false when `/data` is an empty
 unmounted directory, and the deploy is green.
@@ -262,13 +262,13 @@ whatever disko generated, and the README example uses `/dev/disk/by-uuid/`.
   then a race, and the loser gets `rsync --delete`d onto the winner.
 - `by-id` / `by-path`: encodes the controller slot. Move a disk after replacing
   the dead one and the mount points swap.
-- `by-uuid`: `rsync` copies *files*, not the filesystem. The FAT volume ID lives
+- `by-uuid`: `rsync` copies files, not the filesystem. The FAT volume ID lives
   in the boot sector and is never touched by the mirroring, so the two UUIDs
   stay distinct for the life of the partitions -- including after a failover.
 
 ### Trap 9 -- the mirror is not in NVRAM, but it is on the fallback path
 
-`bootctl install` writes an EFI boot variable pointing at the **primary** ESP's
+`bootctl install` writes an EFI boot variable pointing at the primary ESP's
 partition. The mirror is never registered: it is a passive replica that
 systemd-boot has never heard of.
 
@@ -278,7 +278,7 @@ copies that to the mirror along with everything else. Most firmwares will boot
 the second disk from the fallback path once the first is gone or deselected, and
 all of them let you pick it manually from the firmware boot menu.
 
-Test this **before** you need it, by disabling the primary disk in firmware
+Test this before you need it, by disabling the primary disk in firmware
 setup and booting. A mirror nobody has ever booted is a hypothesis.
 
 ### Trap 10 -- `loader/random-seed` is per-installation state
@@ -309,7 +309,7 @@ ESP, more with `boot.initrd.includeDefaultModules` and firmware blobs. At
 plus systemd-boot itself. A 512 MB ESP overflows; 1-1.5 GiB is comfortable.
 
 An overflowing ESP is a nasty failure because it happens inside
-`write_boot_files`, *after* `garbage_collect` has already run -- the old
+`write_boot_files`, after `garbage_collect` has already run -- the old
 generations are gone and the new one did not fit.
 
 ## Usage
@@ -368,7 +368,7 @@ systemd.services.my-archiver = {
 
 ### Staging the recovery payload (one-time, imperative)
 
-The payload is deliberately *not* declarative -- that is the whole point. Boot
+The payload is deliberately not declarative -- that is the whole point. Boot
 the generation you want to be able to fall back to, then, as root:
 
 ```sh
@@ -410,7 +410,7 @@ diff -r /boot /boot-mirror && echo "mirror clean"
 | `boot.mirroredEsp.mirror.enable` | `true` | Emit the mirroring rsync. |
 | `boot.mirroredEsp.mirror.mountPoint` | `"/boot-mirror"` | Passive replica; must differ from primary (asserted). |
 | `boot.mirroredEsp.mirror.device` | `null` | `mkForce`d into `fileSystems`. |
-| `boot.mirroredEsp.mountOptions` | `[ "umask=0077" ]` | Added to **both** ESPs. Concatenates with disko's `defaults`. |
+| `boot.mirroredEsp.mountOptions` | `[ "umask=0077" ]` | Added to both ESPs. Concatenates with disko's `defaults`. |
 | `boot.mirroredEsp.rsyncFlags` | `[ "-a" "--delete" ]` | See Trap 3 before changing. |
 | `boot.mirroredEsp.rsyncExcludes` | `[ ]` | `--exclude=` list. See Trap 10. |
 | `boot.mirroredEsp.recovery.enable` | `false` | Restore the pinned payload after every install. |
@@ -446,29 +446,29 @@ installer's garbage collector really fires.
 
 What it proves:
 
-- **The two ESPs are byte-identical.** Not "both non-empty": the same recursive
-  file *and directory* listing, the same `sha256sum` for every regular file, a
+- The two ESPs are byte-identical. Not "both non-empty": the same recursive
+  file and directory listing, the same `sha256sum` for every regular file, a
   clean `diff -r`, and a floor on file count and total size so the comparison
   cannot pass vacuously on an empty ESP. A stray file planted in the mirror
   beforehand is gone afterwards, which is what proves `--delete` (Trap 3).
-- **The recovery kernel, initrd and loader entry are present** after every
-  install, on *both* ESPs, byte-identical to what was staged.
-- **The recovery entry survives generation garbage collection.** Four
+- The recovery kernel, initrd and loader entry are present after every
+  install, on both ESPs, byte-identical to what was staged.
+- The recovery entry survives generation garbage collection. Four
   generations with three distinct initrds are built; the test asserts the
   initrds really are distinct (otherwise the whole check would be vacuous),
   that generations 1 and 2 lose their loader entries, that generation 2's
-  initrd *file* is deleted from `EFI/nixos` -- and that through all of it the
+  initrd file is deleted from `EFI/nixos` -- and that through all of it the
   pinned payload is still there and the entry's `linux`/`initrd` lines still
   resolve to existing, correct files.
-- **It actually boots.** After the last install, `loader.conf` is pointed at
+- It actually boots. After the last install, `loader.conf` is pointed at
   the recovery entry, the VM is rebooted, and the test asserts a unique marker
   from the pinned entry's `options` line shows up in `/proc/cmdline`. That
   string exists nowhere else, so it can only have come from firmware loading
   the pinned kernel and initrd off the ESP.
 
 The instrument that keeps the survival assertions honest: before the first
-install the test plants two *unpinned* decoys -- one file in `EFI/nixos` and one
-`nixos-*.conf` in `loader/entries` -- and asserts that both are **gone** after
+install the test plants two unpinned decoys -- one file in `EFI/nixos` and one
+`nixos-*.conf` in `loader/entries` -- and asserts that both are gone after
 the install. If they were still there, "the recovery files survived" would only
 mean "the collector never ran", and the test says so instead of passing.
 
@@ -489,25 +489,25 @@ anyway.
 
 ## Caveats
 
-- **Nothing verifies the recovery entry.** The module guarantees the files are
+- Nothing verifies the recovery entry. The module guarantees the files are
   re-laid after every install and that their names cannot be garbage collected.
   It cannot check that the `.conf` points at kernels that exist, or that they
   boot. Boot it once a quarter.
-- **The mirror is refreshed only when the bootloader is installed.** That is
-  every `nixos-rebuild switch`/`boot`, but *not* on a `nixos-rebuild test`, and
+- The mirror is refreshed only when the bootloader is installed. That is
+  every `nixos-rebuild switch`/`boot`, but not on a `nixos-rebuild test`, and
   not if you hand-edit something on the primary ESP. `diff -r` is the check.
-- **XBOOTLDR is not supported for mirroring.** With
+- XBOOTLDR is not supported for mirroring. With
   `boot.loader.systemd-boot.xbootldrMountPoint` set, entries and kernels live on
   XBOOTLDR while the EFI binaries live on the ESP, so a single-partition mirror
   is not a bootable copy. The assertion forces `primary.mountPoint` to the
   partition that receives entries; mirroring the other one is out of scope.
-- **`fileSystems.<p>.options` concatenates.** `mountOptions` is *added* to
+- `fileSystems.<p>.options` concatenates. `mountOptions` is added to
   whatever else declared the mount; it does not replace it. If disko already
   contributes `defaults`, the result is `[ "defaults" "umask=0077" ]`.
-- **Secure Boot changes the picture.** With a shim/`sbctl` setup the mirrored
+- Secure Boot changes the picture. With a shim/`sbctl` setup the mirrored
   binaries must be signed with the same keys, and a hand-staged recovery kernel
   is unsigned unless you signed it before staging. Sign first, stage second.
-- **This is not a substitute for a rescue USB.** It covers "one disk died" and
+- This is not a substitute for a rescue USB. It covers "one disk died" and
   "the last five generations are all broken". It does not cover a corrupted
   root pool, and it never will -- see
   [`remote-luks-unlock`](remote-luks-unlock.md) for getting into a box whose

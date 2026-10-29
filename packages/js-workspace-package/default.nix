@@ -5,7 +5,7 @@
   pnpmConfigHook,
   pnpmBuildHook,
   pnpm_11,
-  nodejs,
+  nodejs_26,
   makeWrapper,
   buildNpmPackage,
   importNpmLock,
@@ -26,7 +26,7 @@ in
     src = ./example-pnpm;
 
     nativeBuildInputs = [
-      nodejs
+      nodejs_26
       pnpm
       pnpmConfigHook
       pnpmBuildHook
@@ -55,7 +55,7 @@ in
       mkdir -p $out/libexec $out/bin
       cp -R . $out/libexec/${finalAttrs.pname}
 
-      makeWrapper ${lib.getExe nodejs} $out/bin/example-cli \
+      makeWrapper ${lib.getExe nodejs_26} $out/bin/example-cli \
         --add-flags $out/libexec/${finalAttrs.pname}/packages/cli/dist/cli.js
 
       runHook postInstall

@@ -13,7 +13,7 @@ in place -- import it and keep configuring `services.nginx` as usual.
 
 A WASM app that wants `SharedArrayBuffer` -- multithreaded WebAssembly, a
 WebGPU/WebGL2 engine that spawns worker threads, anything that shares memory
-across workers -- only gets it in a **cross-origin-isolated** browsing context.
+across workers -- only gets it in a cross-origin-isolated browsing context.
 The browser withholds `crossOriginIsolated` (and `SharedArrayBuffer` with it)
 until the top-level document arrives with two headers:
 
@@ -55,8 +55,8 @@ It also compiles the brotli module into nginx and turns on
 `brotli_static` needs the module present to serve the `.br` sidecars.
 
 This module pairs with, and deliberately extends,
-[`nginx-opinionated-defaults`](../nginx-opinionated-defaults). That module gives
-a good server-level security baseline but emits **no**
+[`nginx-opinionated-defaults`](../../modules/nginx-opinionated-defaults). That module gives
+a good server-level security baseline but emits no
 Cross-Origin-Opener/Embedder/Resource-Policy headers -- and its server-wide
 `extraSecurity` COEP is `require-corp`, which breaks any vhost that embeds
 cross-origin resources. Cross-origin isolation is a per-route concern, so it
@@ -66,22 +66,22 @@ module's http-block map.
 
 ## Traps
 
-**1. A location-level `add_header` REPLACES the inherited server-level headers.**
+1. A location-level `add_header` REPLACES the inherited server-level headers.
 This is the load-bearing one. nginx's `add_header` is not additive across
-levels: the moment a `location` block contains a single `add_header`, *none* of
+levels: the moment a `location` block contains a single `add_header`, none of
 the `add_header`s from the enclosing `server` block apply to that location
 anymore. So the instant you add COOP/COEP/CORP inside `location /app/`, you have
 silently dropped the server block's HSTS (and X-Frame-Options, X-Content-Type-
 Options, Referrer-Policy, CSP) on exactly the app's routes. This module's header
-block therefore **re-emits HSTS and the rest of the baseline itself**, and does
+block therefore re-emits HSTS and the rest of the baseline itself, and does
 so again in the nested immutable-assets location, which is a third header scope.
 A linter like `gixy` will fail the build on the dropped CSP; the dropped HSTS
 just quietly stops protecting your most sensitive routes.
 
-**2. The cache split: no-cache entrypoint vs immutable content-hashed assets.**
+2. The cache split: no-cache entrypoint vs immutable content-hashed assets.
 The entrypoint (`index.html`, or a stable-named loader) has a name that does not
 change between builds, so anything cacheable-by-name pins a returning browser to
-a *dead* build after a redeploy: it holds the old `index.html`, which references
+a dead build after a redeploy: it holds the old `index.html`, which references
 asset filenames that no longer exist, and the app 404s itself into a white
 screen. So the entrypoint is served `no-cache` (store, but revalidate every
 use). Content-hashed assets are the opposite: their filename changes whenever
@@ -91,7 +91,7 @@ regex location is what opts those, and only those, back into far-future caching
 `immutablePaths`. Leave it empty and everything is served `no-cache`: correct,
 but every asset revalidates on every load.
 
-**3. `brotli_static` needs real precompressed sidecars.** The bundle must ship
+3. `brotli_static` needs real precompressed sidecars. The bundle must ship
 `foo.js.br` next to `foo.js` (and `engine.wasm.br` next to `engine.wasm`) for
 `brotli_static on` to serve the precompressed bytes. If your build doesn't emit
 `.br` sidecars, `brotli_static` finds nothing and falls back to the uncompressed
@@ -99,11 +99,11 @@ file -- a multi-megabyte `.wasm` shipped raw. `recommendedBrotliSettings`
 (enabled here by default) adds on-the-fly brotli as a backstop, but precompressed
 sidecars compress harder and cost no request-time CPU.
 
-**4. Exact-match `= /path` strip-prefix `proxy_pass`.** The `apiProxy` entries
+4. Exact-match `= /path` strip-prefix `proxy_pass`. The `apiProxy` entries
 render as `location = /app/api { proxy_pass http://upstream/v1; }`. Two details
-are load-bearing: the `=` makes the match **exact** (only `/app/api`, nothing
+are load-bearing: the `=` makes the match exact (only `/app/api`, nothing
 under it), and putting a URI on the `proxy_pass` (`/v1`) makes nginx forward
-*exactly that URI* -- the public `/app/api` prefix is stripped, not appended.
+exactly that URI -- the public `/app/api` prefix is stripped, not appended.
 Drop the `=` or drop the upstream URI and the public prefix travels upstream, so
 the backend sees `/app/api` and every call 404s.
 

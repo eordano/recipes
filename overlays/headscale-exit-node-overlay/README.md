@@ -7,9 +7,9 @@ ships in a tagged release.
 ## The problem
 
 Headscale generates a packet filter (the derived ACL) that tells nodes what
-traffic to forward. For an **exit node** to work, that filter has to include the
+traffic to forward. For an exit node to work, that filter has to include the
 "catch-all internet" routes -- `0.0.0.0/0` and `::/0`. Some released Headscale
-versions **strip those CIDRs out** of the generated filter. The result is a
+versions strip those CIDRs out of the generated filter. The result is a
 quiet failure: clients happily select the exit node, the route shows up, but no
 traffic actually egresses through it. Nothing errors; packets just go nowhere.
 
@@ -27,7 +27,7 @@ wrong thing or fail the build:
 | Value | What it is | What goes wrong if it's stale |
 |---|---|---|
 | `rev` | the commit you want | you don't get the fix |
-| `hash` | `fetchFromGitHub` source hash | Nix fetches the *old* source (hash mismatch or wrong tree) |
+| `hash` | `fetchFromGitHub` source hash | Nix fetches the old source (hash mismatch or wrong tree) |
 | `vendorHash` | Go module vendor hash | vendor step fails whenever `go.mod`/`go.sum` moved |
 | `version` | string substituted into `version.go` | `headscale version` reports a stale/`dev` value |
 
@@ -59,13 +59,19 @@ uses this build. No other wiring is required.
 
 ## When to delete this
 
-This overlay is a stopgap. Once a **released** Headscale version includes the
+This overlay is a stopgap. Once a released Headscale version includes the
 exit-node filter fix, remove the overlay entirely and go back to the packaged
 `pkgs.headscale`. Carrying a source pin forever means you also carry the burden
 of manually tracking every security fix upstream.
 
 ## Notes
 
+- The pin is on `main` at 0.30.0-dev, whose `go.mod` says `go 1.27.0`, so the
+  overlay builds with `buildGo127Module`; the default `buildGoModule` (Go 1.26)
+  refuses it. Re-check the toolchain on every bump alongside the four values
+  above. 0.30.0-dev also replaces the v1 REST API and drops gRPC, so it is not
+  a drop-in for tooling written against 0.29; the exit-node fix itself shipped
+  in the 0.29.x releases (see "When to delete this").
 - Only `cmd/headscale` is built (`subPackages`); the other command packages
   aren't needed for a control server.
 - The test suite needs a real PostgreSQL and a syscall-redirect shim, which is

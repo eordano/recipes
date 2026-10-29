@@ -1,6 +1,6 @@
 # microvm-ram-snapshot-clones
 
-Per-project throwaway dev VMs that spawn in **under a second**. A NixOS module
+Per-project throwaway dev VMs that spawn in under a second. A NixOS module
 that gives you a `vm` command: `cd` into any project, run `vm`, and you're
 dropped into a fresh, isolated, already-booted microvm whose workspace is that
 directory.
@@ -16,14 +16,14 @@ services, a place to run untrusted build steps or agents -- but:
 
 ## The key insight
 
-**The "snapshot" is a frozen-RAM image, not a disk image.**
+The "snapshot" is a frozen-RAM image, not a disk image.
 
 1. Boot the guest microvm exactly once.
 2. `stop` the CPU over QMP, then `migrate` to `exec:zstd` -- a compressed dump
    of the guest's live RAM.
 3. A clone is that image piped back into a fresh QEMU via
    `-incoming "exec:zstd -d -c snapshot.zst"`. The guest wakes up
-   **already booted** -- no init, no service startup, no waiting.
+   already booted -- no init, no service startup, no waiting.
 
 Because the guest is a microvm booted straight from `-kernel`/`-initrd`/`init=`
 with a shared `memfd` memory backend, restore is essentially the cost of
@@ -36,11 +36,11 @@ the cache modes are load-bearing:
 
 | Mount | Host source | Cache | Why |
 |-------|-------------|-------|-----|
-| `/nix/store` | host `/nix/store` | `cache=always` | Store is immutable; sharing it read-only means **clones cost zero store duplication** -- every clone reuses the host closure. |
-| workspace | the project dir | `cache=auto` | Bound read-write, so edits inside the clone **are edits on the host tree**. This is the whole point -- you work on your real files. |
+| `/nix/store` | host `/nix/store` | `cache=always` | Store is immutable; sharing it read-only means clones cost zero store duplication -- every clone reuses the host closure. |
+| workspace | the project dir | `cache=auto` | Bound read-write, so edits inside the clone are edits on the host tree. This is the whole point -- you work on your real files. |
 
 Nothing else survives a `stop`. The clone is disposable; your files are not,
-because they were never *in* the clone.
+because they were never in the clone.
 
 ### Clone identity is derived, not assigned
 
@@ -50,8 +50,8 @@ md5(realpath project-dir)[:8]  ->  VM name  "devvm-<hash>"
 ```
 
 The same directory always maps to the same clone and port, so `vm` from a
-project is idempotent -- re-enter if running, spawn if not. **Trap:** the port
-space is only 800 wide, so two *different* project dirs can collide on a port.
+project is idempotent -- re-enter if running, spawn if not. Trap: the port
+space is only 800 wide, so two different project dirs can collide on a port.
 Fine for a personal workstation; think twice for many-user hosts.
 
 ### The base snapshot is cache-keyed on the guest closure
@@ -103,7 +103,7 @@ vm help            # full command list
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `enable` | `false` | Turn the module on. |
-| `guestSystem` | -- (required) | An **evaluated** `nixosSystem` for the guest, including `microvm.nixosModules.microvm`. |
+| `guestSystem` | -- (required) | An evaluated `nixosSystem` for the guest, including `microvm.nixosModules.microvm`. |
 | `guestUser` | `"dev"` | Unprivileged user to SSH into inside the guest. |
 | `guestWorkspace` | `/home/<guestUser>/workspace` | Where the project dir is mounted in the guest; interactive sessions `cd` here. |
 | `snapshotDir` | `/var/lib/microvm-clone-snapshot` | Persistent base snapshot. |
@@ -113,7 +113,7 @@ vm help            # full command list
 | `sshExtraOpts` | `""` | Extra SSH opts on every connection (e.g. `-i <key>`). |
 | `sshKeySetup` | `""` | Shell run before SSH (e.g. materialize a key from the store into a 0600 tempfile). |
 | `sshEnterOpts` | `""` | Extra SSH opts for interactive sessions only (e.g. GPG forwarding). |
-| `forwardAgent` | `false` | Forward your ssh-agent (`ssh -A`) into interactive sessions. **Off by default** -- see the security note below. |
+| `forwardAgent` | `false` | Forward your ssh-agent (`ssh -A`) into interactive sessions. Off by default -- see the security note below. |
 
 ## The guest system
 
@@ -124,12 +124,12 @@ and boots those directly with QEMU (no bootloader, `init=<toplevel>/init`).
 
 Your guest must satisfy three contracts:
 
-1. **Be a microvm** -- import `microvm.nixosModules.microvm` (from
+1. Be a microvm -- import `microvm.nixosModules.microvm` (from
    [astro/microvm.nix](https://github.com/astro/microvm.nix)) and set `mem` /
    `vcpu`.
-2. **Mount the two virtiofs shares** by the tags the host uses: `ro-store` at
+2. Mount the two virtiofs shares by the tags the host uses: `ro-store` at
    `/nix/store` and `workspace` at `guestWorkspace`.
-3. **Signal boot readiness** by touching `.boot-ready` in the workspace mount,
+3. Signal boot readiness by touching `.boot-ready` in the workspace mount,
    and run an sshd the host can reach on the forwarded port (root and
    `guestUser`, key-based).
 
@@ -181,36 +181,36 @@ A minimal sketch (adapt to your own keys and packages):
 
 ## Caveats
 
-- **KVM required** for usable speed (`accel=kvm:tcg` falls back to slow TCG).
-- **x86_64 only** as written (`qemu-system-x86_64`, `-cpu max`). Adjust the
+- KVM required for usable speed (`accel=kvm:tcg` falls back to slow TCG).
+- x86_64 only as written (`qemu-system-x86_64`, `-cpu max`). Adjust the
   QEMU binary and machine type for other arches.
-- **Port collisions** -- 800-wide derived port space (see above).
-- **`vm update` is privileged** -- it boots the base VM with virtiofsd and writes
+- Port collisions -- 800-wide derived port space (see above).
+- `vm update` is privileged -- it boots the base VM with virtiofsd and writes
   the snapshot into `snapshotDir`, which is created `0755 root root`; so it runs
   as root (systemd oneshot at boot, or `sudo vm update`).
-- **`clonesDir` on tmpfs** means running clones and their RAM state die on
+- `clonesDir` on tmpfs means running clones and their RAM state die on
   reboot. That's intentional (disposable), but `vm save` is the escape hatch:
   it re-freezes a running clone to `save.zst`, which a later `vm` / `vm restore`
   thaws. Point `clonesDir` at persistent storage if you want clones to survive
   reboots.
-- **The guest closure is shared, not copied** -- a clone sees the host's live
+- The guest closure is shared, not copied -- a clone sees the host's live
   `/nix/store`. Don't GC the store out from under a running clone.
-- **SSH host keys are ignored** (`StrictHostKeyChecking=no`,
+- SSH host keys are ignored (`StrictHostKeyChecking=no`,
   `UserKnownHostsFile=/dev/null`) because clones are ephemeral and share a base
   image. Fine for localhost-forwarded ports; don't reuse this SSH posture for
   anything routable.
 
 ## Security notes
 
-- **Agent forwarding is opt-in.** `ssh -A` is **not** used unless you set
+- Agent forwarding is opt-in. `ssh -A` is not used unless you set
   `forwardAgent = true`. Because the whole point of a clone is to run
   possibly-untrusted build steps or agents, forwarding your ssh-agent would let
   anything inside the guest authenticate to any host your keys reach (GitHub,
   production, ...) without ever seeing the key material. Leave it off unless the
   guest workload is trusted.
-- **`clonesDir` is shared and world-writable, but sticky (`1777`).** The `vm`
+- `clonesDir` is shared and world-writable, but sticky (`1777`). The `vm`
   CLI writes pidfiles, sockets and saved state under `clonesDir`, and clone
-  identity is a *predictable* `md5(realpath project-dir)`. The sticky bit stops
+  identity is a predictable `md5(realpath project-dir)`. The sticky bit stops
   one local user from renaming or deleting another user's clone state (which
   could otherwise plant a pidfile so `vm stop`/`vm list` kills an arbitrary PID,
   or redirect writes via a symlinked `CLONE_DIR`). On a multi-user host, give

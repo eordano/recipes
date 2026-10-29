@@ -8,22 +8,24 @@ with lib;
 let
   cfg = config.services.vaultwardenSandbox;
 
+  runscHost = pkgs.writeShellScript "runsc-host" ''exec ${pkgs.gvisor}/bin/runsc --network=host "$@"'';
+
   vaultwardenImage = pkgs.dockerTools.buildLayeredImage {
     name = "vaultwarden";
     tag = "latest";
-    contents = with pkgs; [
-      vaultwarden
-      vaultwarden.webvault
-      bash
-      coreutils
-      cacert
+    contents = [
+      cfg.package
+      cfg.package.webvault
+      pkgs.bash
+      pkgs.coreutils
+      pkgs.cacert
     ];
     config = {
-      Cmd = [ "${pkgs.vaultwarden}/bin/vaultwarden" ];
+      Cmd = [ "${cfg.package}/bin/vaultwarden" ];
       WorkingDir = "/data";
       Env = [
         "DATA_FOLDER=/data"
-        "WEB_VAULT_FOLDER=${pkgs.vaultwarden.webvault}/share/vaultwarden/vault"
+        "WEB_VAULT_FOLDER=${cfg.package.webvault}/share/vaultwarden/vault"
         "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
       ];
     };
@@ -32,6 +34,32 @@ in
 {
   options.services.vaultwardenSandbox = {
     enable = mkEnableOption "gVisor-sandboxed Vaultwarden vault";
+
+    package = mkOption {
+      type = types.package;
+      default = pkgs.vaultwarden;
+      defaultText = literalExpression "pkgs.vaultwarden";
+      example = literalExpression ''pkgs.vaultwarden.override { dbBackend = "postgresql"; }'';
+      description = ''
+        Vaultwarden build baked into the image. nixpkgs' default is the SQLite
+        backend; a PostgreSQL DATABASE_URL needs a `dbBackend = "postgresql"`
+        build, and `s3://` folders need the `s3` cargo feature.
+      '';
+    };
+
+    backend = mkOption {
+      type = types.enum [
+        "podman"
+        "docker"
+      ];
+      default = "podman";
+      description = ''
+        OCI backend the container runs on. `virtualisation.oci-containers.backend`
+        is one setting per host, so a host whose other containers are docker
+        picks "docker" here; the gVisor `runsc-host` runtime is registered with
+        whichever daemon is chosen and the unit is named `<backend>-vaultwarden`.
+      '';
+    };
 
     dataDir = mkOption {
       type = types.str;
@@ -100,19 +128,53 @@ in
       default = false;
       description = "Allow open registration of new accounts (SIGNUPS_ALLOWED).";
     };
+
+    rsaKeyFile = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "/run/agenix/vaultwarden-rsa-key";
+      description = ''
+        Host path of a PEM RSA private key that signs the login JWTs, readable
+        by `uid`. Mounted read-only and used instead of the key Vaultwarden
+        generates under dataDir on first start. Instances that share a database
+        must share this key, or a token issued by one is rejected by the other.
+      '';
+    };
+
+    environment = mkOption {
+      type = types.attrsOf types.str;
+      default = { };
+      example = {
+        ATTACHMENTS_FOLDER = "s3://vault/attachments";
+      };
+      description = "Extra non-secret environment for the container; overrides the module's own keys.";
+    };
+
+    environmentFiles = mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      description = ''
+        Extra KEY=value env files (secrets such as DATABASE_URL), read after
+        `''${dataDir}/env`. Each must exist when the unit starts.
+      '';
+    };
   };
 
   config = mkIf cfg.enable (mkMerge [
-    {
+    (mkIf (cfg.backend == "podman") {
       virtualisation.podman = {
         enable = true;
         extraPackages = [ pkgs.gvisor ];
       };
 
       virtualisation.containers.containersConf.settings.engine.runtimes.runsc-host = [
-        "${pkgs.writeShellScript "runsc-host" ''exec ${pkgs.gvisor}/bin/runsc --network=host "$@"''}"
+        "${runscHost}"
       ];
-    }
+    })
+
+    (mkIf (cfg.backend == "docker") {
+      virtualisation.docker.daemon.settings.runtimes.runsc-host.path = "${runscHost}";
+    })
 
     {
       services.nginx.enable = true;
@@ -139,12 +201,12 @@ in
         "d ${cfg.dataDir} 0700 ${toString cfg.uid} ${toString cfg.gid} - -"
       ];
 
-      systemd.services.podman-vaultwarden.preStart = lib.mkAfter ''
+      systemd.services."${cfg.backend}-vaultwarden".preStart = lib.mkAfter ''
         touch ${cfg.dataDir}/env
         chown -R ${toString cfg.uid}:${toString cfg.gid} ${cfg.dataDir}
       '';
 
-      virtualisation.oci-containers.backend = "podman";
+      virtualisation.oci-containers.backend = cfg.backend;
       virtualisation.oci-containers.containers.vaultwarden = {
         imageFile = vaultwardenImage;
         image = "vaultwarden:latest";
@@ -157,15 +219,18 @@ in
           DATA_FOLDER = "/data";
           BACKUP_DIR = "/data/backup";
           SIGNUPS_ALLOWED = lib.boolToString cfg.signupsAllowed;
-        };
-        environmentFiles = [ "${cfg.dataDir}/env" ];
+        }
+        // optionalAttrs (cfg.rsaKeyFile != null) { RSA_KEY_FILENAME = "/run/vaultwarden-key/rsa_key"; }
+        // cfg.environment;
+        environmentFiles = [ "${cfg.dataDir}/env" ] ++ cfg.environmentFiles;
         extraOptions = [
           "--runtime=runsc-host"
           "--network=host"
         ];
         volumes = [
           "${cfg.dataDir}:/data"
-        ];
+        ]
+        ++ optional (cfg.rsaKeyFile != null) "${cfg.rsaKeyFile}:/run/vaultwarden-key/rsa_key.pem:ro";
       };
     }
   ]);

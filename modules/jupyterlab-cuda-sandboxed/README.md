@@ -1,7 +1,7 @@
 # jupyterlab-cuda-sandboxed
 
-A NixOS module that runs a **GPU/CUDA JupyterLab** as a native systemd service
-under a **strict systemd sandbox** -- the full lockdown treatment, minus exactly
+A NixOS module that runs a GPU/CUDA JupyterLab as a native systemd service
+under a strict systemd sandbox -- the full lockdown treatment, minus exactly
 the two knobs CUDA cannot live without.
 
 Applies to any PyTorch / Triton / `torch.compile` / hand-written-CUDA-extension
@@ -19,7 +19,7 @@ opaque -- an import error deep in `torch`, or a `mmap` that returns `EPERM`.
 
 ### 1. CUDA forces two sandbox knobs open
 
-- **`MemoryDenyWriteExecute = false`** -- Triton, TorchInductor, and any
+- `MemoryDenyWriteExecute = false` -- Triton, TorchInductor, and any
   JIT-compiled kernel map memory that is **writable and executable at the same
   time**. `MemoryDenyWriteExecute=true` (the hardened default) kills that with
   `EPERM`. It must be off.
@@ -40,12 +40,12 @@ device exposure back:
 
 ### 2. `ProtectSystem=strict` makes every framework cache blow up
 
-With a read-only root, the **only** writable location is `ReadWritePaths`
+With a read-only root, the only writable location is `ReadWritePaths`
 (the single `dataDir`). But every ML framework wants to write a cache
-*somewhere*, and by default those somewheres are scattered across `$HOME` and
+somewhere, and by default those somewheres are scattered across `$HOME` and
 `/tmp` in ways that trip the sandbox on first import or first compile.
 
-The fix is to redirect **all** of them under `dataDir` via env vars, and
+The fix is to redirect all of them under `dataDir` via env vars, and
 pre-create the tree with `tmpfiles` so nothing races a missing directory:
 
 | Cache | Env var |
@@ -70,9 +70,9 @@ strict mount namespace via `BindReadOnlyPaths`). All are wired up here.
 
 ## Access control -- read this
 
-The notebook runs with **no token and no password**, bound to **loopback
+The notebook runs with no token and no password, bound to **loopback
 (`127.0.0.1`)**. That is deliberate: **the nginx TLS vhost is the sole
-authenticator.** The module *asserts* that `domain` and `acmeHost` are set
+authenticator.** The module asserts that `domain` and `acmeHost` are set
 before it will enable, precisely so you can't accidentally stand up an
 unauthenticated notebook.
 
@@ -85,7 +85,7 @@ your environment uses.
 
 ### Security notes
 
-- **Cross-origin defenses stay on.** The server runs with the XSRF check
+- Cross-origin defenses stay on. The server runs with the XSRF check
   enabled and `--ServerApp.allow_origin` scoped to `https://<domain>` -- on a
   token-less notebook these are the last line of defense against a malicious
   page in the operator's browser driving the loopback port via CSRF or
@@ -124,8 +124,8 @@ carry the kernel comm channel.
 | Option | Default | Notes |
 |--------|---------|-------|
 | `enable` | `false` | |
-| `domain` | `null` | **Required.** nginx vhost -- the only front-door auth. |
-| `acmeHost` | `null` | **Required.** ACME cert host for the vhost. |
+| `domain` | `null` | Required. nginx vhost -- the only front-door auth. |
+| `acmeHost` | `null` | Required. ACME cert host for the vhost. |
 | `cudaPkgs` | `pkgs` | nixpkgs instance for python/torch/cudatoolkit. Point at unstable for fresh CUDA wheels + a shared closure. |
 | `cudaDevices` | `"0"` | Space-separated GPU indices; drives both the device whitelist and `CUDA_VISIBLE_DEVICES`. |
 | `dataDir` | `/var/lib/jupyter` | HOME, WorkingDirectory, sole writable path, cache root. |
@@ -138,11 +138,11 @@ carry the kernel comm channel.
 
 ## Caveats
 
-- **`cudaPkgs` is not optional in spirit.** The default (`pkgs`) works only if
+- `cudaPkgs` is not optional in spirit. The default (`pkgs`) works only if
   your pinned nixpkgs already has CUDA-enabled torch you're happy with.
   Otherwise point it at an unstable channel. Sharing one `cudaPkgs` across every
   CUDA service on the host avoids compiling PyTorch once per service.
-- **NVIDIA driver + `/run/opengl-driver`** must exist on the host
+- NVIDIA driver + `/run/opengl-driver` must exist on the host
   (`hardware.nvidia` / `hardware.graphics`); the module binds it read-only but
   doesn't configure the driver.
 - The device whitelist assumes a standard `/dev/nvidia*` layout. Exotic setups

@@ -1,8 +1,8 @@
 # pgadmin-container-host-socket
 
-Run **pgAdmin** (or any bundled web DB admin) inside a private-network NixOS
-container that reaches the **host's** PostgreSQL over a bind-mounted
-`/run/postgresql` **Unix socket** -- not TCP.
+Run pgAdmin (or any bundled web DB admin) inside a private-network NixOS
+container that reaches the host's PostgreSQL over a bind-mounted
+`/run/postgresql` Unix socket -- not TCP.
 
 ## Problem
 
@@ -12,7 +12,7 @@ tempts you into opening a TCP port on PostgreSQL just so the admin UI can
 reach it. You want:
 
 - pgAdmin isolated in its own namespace,
-- the DB reachable with **no TCP listener and no password on the wire** for
+- the DB reachable with no TCP listener and no password on the wire for
   local connections,
 - a clean reverse-proxy handoff to nginx for TLS.
 
@@ -24,22 +24,22 @@ directory gives you all three.
 Four things look redundant but are each doing real work. Remove any one and it
 breaks in a way that's annoying to debug:
 
-1. **Bind-mount `/run/postgresql` read-write into the container.** This is the
+1. Bind-mount `/run/postgresql` read-write into the container. This is the
    whole trick: pgAdmin (and the optional role-setup step) connect to the host
    database over the Unix socket. No TCP, no network exposure.
 
-2. **Pin the container's `services.postgresql.package` to the host's.** The
-   container only needs the *client* libraries, but they must match the server
+2. Pin the container's `services.postgresql.package` to the host's. The
+   container only needs the client libraries, but they must match the server
    version, or you get protocol/catalog mismatch errors that look like
    corruption. The module reads `config.services.postgresql.package` from the
    host and forces the same package inside.
 
-3. **`DEFAULT_SERVER = "0.0.0.0"`.** By default pgAdmin binds loopback only.
+3. `DEFAULT_SERVER = "0.0.0.0"`. By default pgAdmin binds loopback only.
    Inside the container that means the host-side nginx proxy at
-   `localAddress:port` gets **connection-refused**. Binding `0.0.0.0` makes it
+   `localAddress:port` gets connection-refused. Binding `0.0.0.0` makes it
    listen on the container's veth so the proxy can reach it.
 
-4. **Order.** The container is `after`/`requires` `postgresql.service` so the
+4. Order. The container is `after`/`requires` `postgresql.service` so the
    socket exists before pgAdmin starts (otherwise it comes up unable to connect
    and you must restart it). The container->host firewall is kept minimal: only
    DNS to the host resolver is allowed on the veth (`ve-pgadmin`); the
@@ -83,7 +83,7 @@ modules.services.pgadmin = {
 };
 ```
 
-The role password is **never placed on the psql command line** (argv is
+The role password is never placed on the psql command line (argv is
 world-readable via `/proc/<pid>/cmdline` on a default host). The one-shot feeds
 all SQL to `psql` over stdin and has psql read the secret itself into a
 variable, which also expands as a properly escaped literal to avoid SQL
@@ -110,7 +110,7 @@ injection.
 
 ## Caveats
 
-- The container reaches the DB **as whatever role local socket auth grants**.
+- The container reaches the DB as whatever role local socket auth grants.
   With the common `peer`/`trust` local setup, the container process can act as
   privileged DB roles -- treat the container boundary as part of your DB trust
   model.
@@ -123,13 +123,13 @@ injection.
 
 ### Security notes
 
-- **Container->host firewall is intentionally minimal.** The veth allows only
+- Container->host firewall is intentionally minimal. The veth allows only
   DNS to the host resolver; pgAdmin is an internet-facing web app with a CVE
-  history, so it is deliberately *not* granted blanket access to host-bound
+  history, so it is deliberately not granted blanket access to host-bound
   services. If pgAdmin genuinely needs to reach another host port, add a scoped
   rule under `networking.firewall.interfaces."ve-pgadmin"` rather than trusting
   the whole interface.
-- **DB role password is quoted safely.** When `createUser` is set, the one-shot
+- DB role password is quoted safely. When `createUser` is set, the one-shot
   has psql read the secret into a variable and expand it via `:'pw'`, which
   escapes it as a SQL string literal -- a password containing quotes cannot
   break out or inject DDL. The secret also never appears on any process argv.

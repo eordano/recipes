@@ -1,11 +1,11 @@
 # js-workspace-package
 
-Package a **pnpm or npm workspace** (a JS monorepo) with Nix: three worked,
+Package a pnpm or npm workspace (a JS monorepo) with Nix: three worked,
 buildable examples of a two-package monorepo whose leaf package depends on a
-sibling workspace member *and* on a registry package, built entirely offline.
+sibling workspace member and on a registry package, built entirely offline.
 
 All three build and self-check against nixpkgs `nixos-unstable` (`.version`
-**26.11**), `nodejs` 24.18.0, `pnpm` 11.15.0:
+26.11), `nodejs` 24.18.0, `pnpm` 11.15.0:
 
 ```
 nix-build -E 'with import <nixpkgs> {}; callPackage ./default.nix {}' \
@@ -22,26 +22,26 @@ asserts its output, so "it built" means "it works", not "it linked".
 The two categories answer different questions, and this one is squarely the
 first:
 
-- **`overlays/` is for changing a package that already exists.** Every overlay
+- `overlays/` is for changing a package that already exists. Every overlay
   recipe in this collection takes a nixpkgs attribute and rewrites it --
   `go-vendor-patch-prefix-rewrite` re-prefixes a patch so it applies inside a
   vendored Go tree, `skip-flaky-tests-overlay` disables a check,
   `electron-bin-override` swaps a from-source build for the prebuilt one. They
   are all shaped `final: prev: { foo = prev.foo.overrideAttrs ... }`. There is no
-  nixpkgs attribute here to override: the subject is *your* monorepo, which
+  nixpkgs attribute here to override: the subject is your monorepo, which
   nixpkgs has never heard of.
-- **`packages/` is for a derivation you write from scratch**, and that is
+- `packages/` is for a derivation you write from scratch, and that is
   exactly the deliverable -- `stdenv.mkDerivation` / `buildNpmPackage` calls that
   turn a source tree into a package.
 
-The tiebreaker is that the recipe must be **buildable to be trustworthy**. The
+The tiebreaker is that the recipe must be buildable to be trustworthy. The
 claims below are about hash layouts, fetcher-version asserts and hook ordering,
 and the only honest way to make them is to run them. A `packages/` recipe is
 picked up by the flake's `packagesOverlay` and exposed as
 `packages.<system>.js-workspace-package`, so `nix build` checks the prose on
 every evaluation. An overlay recipe has nothing to build.
 
-Like `go-vendor-patch-prefix-rewrite`, this is a **technique** recipe: the
+Like `go-vendor-patch-prefix-rewrite`, this is a technique recipe: the
 fixtures are here to be read and copied, not consumed. Nobody should depend on
 `example-pnpm-cli`.
 
@@ -60,31 +60,31 @@ npm error request to https://registry.npmjs.org/is-odd/-/is-odd-3.0.1.tgz failed
   reason: getaddrinfo EAI_AGAIN registry.npmjs.org
 ```
 
-So the download has to move into a separate **fixed-output derivation** (FOD),
+So the download has to move into a separate fixed-output derivation (FOD),
 which is the only kind of derivation allowed to reach the network -- in exchange
 for you pinning its output hash by hand. Everything below is about making that
 FOD's output byte-identical across machines and across time, because the moment
 it is not, your hash rots and every consumer's build breaks.
 
-nixpkgs gives you three ways to do it. They are **not** interchangeable.
+nixpkgs gives you three ways to do it. They are not interchangeable.
 
 | | fetcher | hash to maintain | derivations | workspace support |
 | --- | --- | --- | --- | --- |
 | pnpm | `fetchPnpmDeps` | 1 | 1 FOD | `pnpmWorkspaces` (`--filter`) |
 | npm | `fetchNpmDeps` (via `buildNpmPackage`'s `npmDepsHash`) | 1 | 1 FOD | `npmWorkspace` + `npmDepsFetcherVersion = 2` |
-| npm | `importNpmLock` | **none** | one `fetchurl` per dependency | inherited from the lockfile |
+| npm | `importNpmLock` | none | one `fetchurl` per dependency | inherited from the lockfile |
 
 ### What upstream nixpkgs does NOT give you
 
-**There is no `buildPnpmPackage`.** `pkgs/top-level/all-packages.nix:2786-2789`
+There is no `buildPnpmPackage`. `pkgs/top-level/all-packages.nix:2786-2789`
 exposes exactly two names from the pnpm build support -- `fetchPnpmDeps` and
 `pnpmConfigHook` -- and nothing wraps them into a builder. `pnpmBuildHook`
 exists but lives out of the way in `pkgs/by-name/pn/pnpmBuildHook/package.nix`
 and is a bare `makeSetupHook`. You assemble `stdenv.mkDerivation` yourself. The
-npm side, by contrast, *does* have `buildNpmPackage`
+npm side, by contrast, does have `buildNpmPackage`
 (`all-packages.nix:2419`).
 
-**There is no `prefetch-pnpm-deps`.** `all-packages.nix:473` gives you
+There is no `prefetch-pnpm-deps`. `all-packages.nix:473` gives you
 `prefetch-yarn-deps` and `:2425` gives you `prefetch-npm-deps`; there is no pnpm
 equivalent. For pnpm the only way to obtain a hash is the fake-hash round trip.
 
@@ -100,7 +100,7 @@ does not know
 - `2 | 3` -> the modern flat `packages` map.
 - anything else -> `We don't support lockfile version N, please file an issue.`
 
-`importNpmLock` is stricter and fails *at evaluation*, not at build. It reads
+`importNpmLock` is stricter and fails at evaluation, not at build. It reads
 `packageLock.packages` unconditionally
 (`pkgs/build-support/node/import-npm-lock/default.nix:145`), and a
 `lockfileVersion: 1` file has no `packages` key at all. Measured:
@@ -122,7 +122,7 @@ lockfileVersion="$(yq -r .lockfileVersion pnpm-lock.yaml)"
 if [[ ${lockfileVersion:0:1} -gt <pnpm major> ]]; then
 ```
 
-`${lockfileVersion:0:1}` is the **first character**. For today's `'9.0'` that is
+`${lockfileVersion:0:1}` is the first character. For today's `'9.0'` that is
 `9` and the check works. The day pnpm writes a two-digit lockfile version, `10`
 truncates to `1` and the guard silently passes for every pnpm major. Do not rely
 on it; pin the pnpm major deliberately.
@@ -145,13 +145,13 @@ Combine that with `all-packages.nix:2784`, `pnpm = pnpm_11`, and the conclusion
 is: **with the default `pnpm`, `fetcherVersion = 4` is the only value that
 evaluates.** Every copy-pasted `fetcherVersion = 1` or `2` from a pre-26.11
 blog post is now an eval error, and every `fetcherVersion = 3` example is an
-eval error unless it *also* pins `pnpm_10` or older.
+eval error unless it also pins `pnpm_10` or older.
 
 `fetcherVersion` is not cosmetic -- it changes the FOD's on-disk layout and
 therefore the hash:
 
-- **3** builds a reproducible zstd tarball of the pnpm store.
-- **4** additionally dumps pnpm 11's `index.db` SQLite file to a text SQL dump
+- 3 builds a reproducible zstd tarball of the pnpm store.
+- 4 additionally dumps pnpm 11's `index.db` SQLite file to a text SQL dump
   and rebuilds it at install time, because SQLite's binary format embeds a
   non-deterministic `version-valid-for` counter
   (`fetch-pnpm-deps/default.nix:166-181`, `pnpm-config-hook.sh:62-65`).
@@ -196,8 +196,8 @@ Known issues:
 Only `pnpm_10` (10.34.5) and `pnpm_11` (11.15.0) evaluate clean. If you
 genuinely need an older store format you must add the exact `pnpm-<version>`
 string to `nixpkgs.config.permittedInsecurePackages` -- and note that
-`permittedInsecurePackages` set in *your* flake does **not** reach a package
-defined inside an *input* flake that instantiates its own nixpkgs.
+`permittedInsecurePackages` set in your flake does not reach a package
+defined inside an input flake that instantiates its own nixpkgs.
 
 ### Trap 5 -- the workspace filter must be identical in all three places, and an over-narrow one succeeds silently
 
@@ -205,16 +205,16 @@ defined inside an *input* flake that instantiates its own nixpkgs.
 
 - by the fetcher, as `--filter=` on the online `pnpm install`
   (`fetch-pnpm-deps/default.nix:50`, `:143-149`);
-- by `pnpmConfigHook`, as `--filter=` on the **offline** install
+- by `pnpmConfigHook`, as `--filter=` on the offline install
   (`pnpm-config-hook.sh:75-80`);
 - by `pnpmBuildHook`, as `--filter=` on `pnpm run`
   (`pkgs/by-name/pn/pnpmBuildHook/pnpm-build-hook.sh:20-24`).
 
-`--filter` matches the **package name** from each member's `package.json`, not
+`--filter` matches the package name from each member's `package.json`, not
 the directory. Two measured failure shapes:
 
-1. **Narrow in both places.** Filter to just the leaf `@example/cli`, whose only
-   dependency is a `workspace:*` link. The FOD downloads *nothing* and the build
+1. Narrow in both places. Filter to just the leaf `@example/cli`, whose only
+   dependency is a `workspace:*` link. The FOD downloads nothing and the build
    succeeds -- with a pnpm store that is empty and a sibling that is broken at
    runtime. The empty-store hash is a stable, recognisable fingerprint: this
    fixture produced `sha256-dIp6CNh1Kn4aqJWku1G/FUdn/u+epzhqlqwnAkB2uW0=`, which
@@ -222,11 +222,11 @@ the directory. Two measured failure shapes:
    `pkgs/test/pnpm/pnpm-workspaces/default.nix:21` -- because that test's members
    also have no registry dependencies. **If your `pnpmDeps` hash equals another
    project's, your filter selected nothing.** (The fingerprint is per pnpm-major
-   *and* per fetcherVersion: the pnpm 10 / fetcherVersion 3 empty store is
+   and per fetcherVersion: the pnpm 10 / fetcherVersion 3 empty store is
    `sha256-u0GOAX5B1f2ANWbOezScp/eKQRRZA/JoYfQ5zLrNip4=`,
    `pkgs/test/pnpm/pnpm-empty-lockfile/default.nix:24`.)
 
-2. **Narrow in the fetcher only.** The offline install then wants a tarball the
+2. Narrow in the fetcher only. The offline install then wants a tarball the
    store never got:
 
    ```
@@ -237,7 +237,7 @@ the directory. Two measured failure shapes:
 
    `pnpmConfigHook` then prints its stock advice -- "Set pnpmDeps.hash to an
    empty string, rebuild, copy the new hash"
-   (`pnpm-config-hook.sh:96-101`). **That advice is wrong for this failure.**
+   (`pnpm-config-hook.sh:96-101`). That advice is wrong for this failure.
    The hash is correct for the filter you asked for; the filter is what is
    wrong. Following the hint bakes the broken dependency set into a new hash and
    the build fails again identically.
@@ -249,7 +249,7 @@ including siblings reached through `workspace:*` links. `pnpmWorkspaces = [
 
 ### Trap 6 -- npm workspaces need `npmDepsFetcherVersion = 2`, and the env var to prefetch it
 
-`fetchNpmDeps` has its **own** `fetcherVersion`, unrelated in both numbering and
+`fetchNpmDeps` has its own `fetcherVersion`, unrelated in both numbering and
 meaning to pnpm's, defaulting to `1`
 (`pkgs/build-support/node/prefetch-npm-deps/default.nix:240-243`):
 
@@ -260,7 +260,7 @@ meaning to pnpm's, defaulting to `1`
 fetcherVersion ? 1,
 ```
 
-A *packument* is the registry's per-package metadata document. `npm ci` asks for
+A packument is the registry's per-package metadata document. `npm ci` asks for
 one whenever a workspace member resolves a sibling by version range; with
 version 1 the cache holds none and `npm ci` fails offline -- which is exactly why
 the hook's own failure text leads with "1. Set `npmDepsFetcherVersion = 2` (and
@@ -272,7 +272,7 @@ exports `NIX_NPM_FETCHER_VERSION` so `npmConfigHook` can cross-check it against
 the `.fetcher-version` file in the cache and tell you the hash is stale rather
 than letting npm fail cryptically (`hooks/npm-config-hook.sh:31-52`).
 
-Getting the hash **without** a build round-trip needs the environment variable,
+Getting the hash without a build round-trip needs the environment variable,
 because the CLI has no flag for it (`src/main.rs:471-478`):
 
 ```console
@@ -282,7 +282,7 @@ $ prefetch-npm-deps package-lock.json          # forgot it -> v1 layout
 sha256-uyswbNOnaX5j0XZEBDkg+Qg5TrOhZZDJOuXUOoomN38=
 ```
 
-Those are the two hashes for the *same* lockfile. Use the wrong one and you get
+Those are the two hashes for the same lockfile. Use the wrong one and you get
 a plain FOD hash mismatch that says nothing about fetcher versions.
 
 Version 2 also silently costs you the read-only cache optimisation: with more
@@ -308,8 +308,8 @@ warning: More than 50% of packages are missing 'resolved' URLs. ...
 warning: Consider regenerating upstream's lockfile with: npm install --package-lock-only
 ```
 
-Every one of those four is a workspace link that is *supposed* to have no URL.
-The smaller the monorepo, the louder the false alarm. Read the *list*, not the
+Every one of those four is a workspace link that is supposed to have no URL.
+The smaller the monorepo, the louder the false alarm. Read the list, not the
 percentage: if the named packages are all your own members, ignore it.
 
 The list is emitted from a `rayon` parallel partition, so **the order of those
@@ -326,10 +326,10 @@ not documented anywhere in the manual.
 
 `npmInstallHook` does two things that do not compose:
 
-- it names the output directory after the **root** `package.json`'s `.name` --
+- it names the output directory after the root `package.json`'s `.name` --
   `jq --raw-output '.name' package.json`, with no `$npmWorkspace` prefix
   (`build-npm-package/hooks/npm-install-hook.sh:8`);
-- it copies the **root** `node_modules` wholesale into that directory
+- it copies the root `node_modules` wholesale into that directory
   (`:39`), and the root `node_modules` of any npm workspace contains one
   symlink per member pointing at `../../packages/<member>` -- which is never
   copied.
@@ -348,10 +348,10 @@ It is fetcher-independent: `importNpmLock` reproduces it identically.
 
 nixpkgs has no fix, only per-package `postInstall` workarounds, in two flavours:
 
-- **Materialise the targets.** `pkgs/by-name/js/jsdoc/package.nix:29-32` does
+- Materialise the targets. `pkgs/by-name/js/jsdoc/package.nix:29-32` does
   `mkdir -p $out/lib/node_modules/jsdoc/packages; mv packages/* ...`. Keeps the
   links working, so the leaf can still `require()` its sibling.
-- **Delete the links.** `pkgs/by-name/mc/mcp-server-memory/package.nix:27-34`
+- Delete the links. `pkgs/by-name/mc/mcp-server-memory/package.nix:27-34`
   `rm -rf`s each `node_modules/@modelcontextprotocol/server-*` plus
   `node_modules/.bin`, with a `TODO` to revisit it once nixpkgs PR #333759 has
   landed. Only safe when
@@ -371,7 +371,7 @@ The asymmetry is easy to miss and it is why a package with a `node-gyp` addon
   `npm_config_platform` (`hooks/npm-config-hook.sh:17-20`);
 - adds `nodejs.python` to `nativeBuildInputs`
   (`build-npm-package/default.nix:104`) -- node-gyp needs a Python;
-- runs `npm ci --ignore-scripts`, then **`npm rebuild`**, then `patchShebangs`
+- runs `npm ci --ignore-scripts`, then `npm rebuild`, then `patchShebangs`
   twice (`:125-143`).
 
 `pnpmConfigHook` exports `npm_config_arch` / `npm_config_platform` (plus the
@@ -424,41 +424,41 @@ installPhase = ''
 ```
 
 If you need a flat, copyable `node_modules` instead, force the hoisted linker --
-but put it in the **right phase**, and note that upstream's best-known example
+but put it in the right phase, and note that upstream's best-known example
 puts it in a different one on purpose.
 
 Any pnpm setting that must apply to the fetched store belongs in
-`prePnpmInstall`, because that is the one hook run by *both* sides: the fetcher
+`prePnpmInstall`, because that is the one hook run by both sides: the fetcher
 interpolates it before its online install (`fetch-pnpm-deps/default.nix:135`)
 and `pnpmConfigHook` runs it before the offline one
 (`pnpm-config-hook.sh:82`). Settings placed there keep the two installs in
 agreement -- and change the FOD's contents, so changing one invalidates
 `pnpmDeps.hash`.
 
-`pkgs/by-name/we/webeep-sync/package.nix:72` does **not** do that. Its
+`pkgs/by-name/we/webeep-sync/package.nix:72` does not do that. Its
 `pnpm config set node-linker hoisted` sits in `buildPhase`, after
 `pnpmConfigHook` has already materialised the symlink forest -- it re-links the
 tree for packaging only, and has no effect on `pnpmDeps` or its hash. That
 package defines no `prePnpmInstall` at all. Copy it if you want a flat tree at
-*install* time; do not copy it expecting a hoisted *store*.
+install time; do not copy it expecting a hoisted store.
 
 ### Trap 11 -- registries: two different mechanisms, and packuments ignore both
 
-- **pnpm** takes the registry from the *impure* environment variable
+- pnpm takes the registry from the impure environment variable
   `NIX_NPM_REGISTRY`, listed in `impureEnvVars` and interpolated straight into
   the install (`fetch-pnpm-deps/default.nix:92-93`, `:148`). Being impure, it
   does not participate in the hash -- two machines with different values can
   produce different stores under the same hash.
-- **npm** takes a *pure* Nix argument: `npmRegistryOverridesString`, defaulting
+- npm takes a pure Nix argument: `npmRegistryOverridesString`, defaulting
   to `config.npmRegistryOverridesString`
   (`prefetch-npm-deps/default.nix:239`, `:300`), settable fleet-wide as
   `nixpkgs.config.npmRegistryOverrides = { "registry.npmjs.org" =
   "my-mirror.local/registry.npmjs.org"; }` (`pkgs/top-level/config.nix:177-192`).
   The rewrite happens per-URL in `src/util.rs:23-36`.
-- **Packuments ignore the override for cache-key purposes.** `fetch_packuments`
+- Packuments ignore the override for cache-key purposes. `fetch_packuments`
   builds its URL from a hard-coded `https://registry.npmjs.org`
   (`src/main.rs:147`) and uses that same string as the cacache key
-  (`:161`, `:176`). The override still redirects where the *bytes* come from,
+  (`:161`, `:176`). The override still redirects where the bytes come from,
   but a build whose `.npmrc` points npm at a private registry will look up a
   different key and miss. Private-registry workspaces are the case where
   `importNpmLock` -- which uses ordinary `fetchurl` per dependency and no cache
@@ -474,18 +474,18 @@ dependency, keyed on the `integrity` field already in the lockfile
 (`import-npm-lock/default.nix:25-76`). Nothing to pin, nothing to regenerate on
 a dependency bump. The costs, in order of how much they hurt:
 
-- **One derivation per dependency.** A 1500-package lockfile is 1500 fetchurls
+- One derivation per dependency. A 1500-package lockfile is 1500 fetchurls
   in your eval and your store.
-- **`fetchGit` for git dependencies** (`:55-69`), which is impure-ish and
+- `fetchGit` for git dependencies (`:55-69`), which is impure-ish and
   ignores `fetcherOpts` you might expect `fetchgit` to honour.
-- **`npmHooks.npmConfigHook` does not work with it** -- you must pass
+- `npmHooks.npmConfigHook` does not work with it -- you must pass
   `npmConfigHook = importNpmLock.npmConfigHook;`. `importNpmLock` ships its own
   (`:253-254`), and the manual states the incompatibility as a bare note under
   `#javascript-buildNpmPackage-importNpmLock` without saying what breaks. Since
   `buildNpmPackage` defaults `npmConfigHook` to the wrong one
   (`build-npm-package/default.nix:101`), omitting the override is the default
   behaviour, not an obvious mistake.
-- It does **not** rescue you from Trap 8; the dangling-symlink failure is
+- It does not rescue you from Trap 8; the dangling-symlink failure is
   identical.
 
 Its companion `importNpmLock.buildNodeModules` +
@@ -549,10 +549,10 @@ stdenv.mkDerivation (finalAttrs: {
 ```
 
 If the project lives in a subdirectory, set `sourceRoot` on `fetchPnpmDeps` and
-`pnpmRoot` on the outer derivation to the *same* location -- `pnpmConfigHook`
+`pnpmRoot` on the outer derivation to the same location -- `pnpmConfigHook`
 pushes into `$pnpmRoot` before installing (`pnpm-config-hook.sh:11-13`).
 
-Extra pnpm settings go in `prePnpmInstall`, which must be passed to **both** the
+Extra pnpm settings go in `prePnpmInstall`, which must be passed to both the
 fetcher and the derivation or the two installs disagree:
 
 ```nix
@@ -580,7 +580,7 @@ buildNpmPackage (finalAttrs: {
 })
 ```
 
-`<root-package-name>` is `.name` from the **root** `package.json`, which is what
+`<root-package-name>` is `.name` from the root `package.json`, which is what
 `npmInstallHook` used to name the output directory.
 
 ### Getting a hash
@@ -626,30 +626,30 @@ registry dependency, offline install -- are exercised by one 20-line program.
 
 ## Caveats
 
-- **These examples are technique demonstrations, not packages you want.** They
+- These examples are technique demonstrations, not packages you want. They
   build a toy CLI. Copy the structure, not the fixture.
-- **Nothing in this recipe touches a NixOS module.** It is package-level only;
+- Nothing in this recipe touches a NixOS module. It is package-level only;
   there is no option namespace, no service, no system closure impact.
-- **Everything is pinned to nixpkgs 26.11 semantics.** The `fetcherVersion`
+- Everything is pinned to nixpkgs 26.11 semantics. The `fetcherVersion`
   arithmetic in particular is release-specific: 1 and 2 were removed *in this
-  release*, and 3 was retired for `pnpm_11` *in this release*. Read
+  release*, and 3 was retired for `pnpm_11` in this release. Read
   `fetch-pnpm-deps/default.nix:19-70` in whatever nixpkgs you actually use
   before copying a number out of here.
-- **Do not use `--force` reasoning from the fetcher in your own build.** The
+- Do not use `--force` reasoning from the fetcher in your own build. The
   fetcher passes `pnpm install --force` deliberately, to pull dependencies for
   platforms other than the builder's (`fetch-pnpm-deps/default.nix:141-144`).
   The offline install in the build must not.
-- **`__structuredAttrs` matters for list-valued attributes.** `pnpmWorkspaces`,
+- `__structuredAttrs` matters for list-valued attributes. `pnpmWorkspaces`,
   `pnpmInstallFlags` and friends are read with `concatTo`, which works either
   way, but nixpkgs' own workspace test runs both variants explicitly
   (`pkgs/test/pnpm/pnpm-workspaces/default.nix`) because they have historically
   diverged. Test both if you ship a library.
-- **Bare `pkgs.pnpm` works only until the alias advances.** Using `pnpm`
+- Bare `pkgs.pnpm` works only until the alias advances. Using `pnpm`
   instead of pinning the major (e.g. `pnpm_11`) is fine while the `pnpm` alias
-  *equals* the major whose lockfile format you have -- but when the alias moves
+  equals the major whose lockfile format you have -- but when the alias moves
   to the next major, the store format changes under you and your `pnpmDeps` hash
   moves with it. Pin the major.
-- **Yarn is a fourth, separate story.** `fetchYarnDeps` +
+- Yarn is a fourth, separate story. `fetchYarnDeps` +
   `yarnConfigHook`/`yarnBuildHook`/`yarnInstallHook` for v1
   (`all-packages.nix:471-478`), and `yarn-berry_X.fetchYarnBerryDeps` +
   `yarnBerryConfigHook` for v3/v4. None of the pnpm or npm knobs above transfer.

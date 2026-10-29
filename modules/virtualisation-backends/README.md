@@ -3,11 +3,11 @@
 One NixOS module that gates four VM/container back-ends behind a single boolean
 each:
 
-- **VirtualBox host** -- run VirtualBox VMs on this machine
-- **VirtualBox guest** -- guest additions, for when *this* machine is itself a
+- VirtualBox host -- run VirtualBox VMs on this machine
+- VirtualBox guest -- guest additions, for when this machine is itself a
   VirtualBox VM
-- **virt-manager** -- QEMU/KVM via `libvirtd`, driven by virt-manager
-- **Waydroid** -- an Android container
+- virt-manager -- QEMU/KVM via `libvirtd`, driven by virt-manager
+- Waydroid -- an Android container
 
 The wiring is trivial. The value of this recipe is three traps that each cost a
 debugging session to find, all preserved in the code with comments.
@@ -25,7 +25,7 @@ config =
   (mkIf cfg.c { ... });
 ```
 
-`//` is plain attribute-set update: it keeps only the **last** operand's
+`//` is plain attribute-set update: it keeps only the last operand's
 attributes and silently discards every earlier block. The result type-checks,
 evaluates, and builds -- it is just missing most of your config, with no error to
 point at it. `//` is only safe between plain attrsets that carry no
@@ -56,7 +56,7 @@ host-only networking you have to give up the KVM backend.
 
 `pkgs.qemu_full` pulls in ceph and glusterfs storage backends by default. On a
 desktop VM host they are dead weight -- and on current nixpkgs unstable (gcc15)
-ceph **fails to compile**, which blocks the machine's entire system closure from
+ceph fails to compile, which blocks the machine's entire system closure from
 building. Override them off:
 
 ```nix
@@ -69,7 +69,7 @@ package = pkgs.qemu_full.override {
 
 Recent nixpkgs removed the `x11` sub-option from
 `virtualisation.virtualbox.guest`. Don't set it; it no longer exists. Its
-neighbour `dragAndDrop` *does* still exist (and defaults to `true`), but it was
+neighbour `dragAndDrop` does still exist (and defaults to `true`), but it was
 renamed from the older lowercase `draganddrop`, so an old config spelling it
 that way rides a rename shim rather than the real option. The module here sets
 neither and takes the guest defaults.

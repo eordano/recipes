@@ -258,6 +258,36 @@ let
       ${interface.dnsmasq.extraConfig}
     '';
 
+  collectAddresses =
+    name: interface:
+    let
+      at = "@${head interface.dnsServers} 2>/dev/null";
+      a =
+        host:
+        ''${dig} +short ${host} A ${at} | ${grep} -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' >> "$TMPFILE" || true'';
+      aaaa =
+        host:
+        optionalString ipv6Enabled ''${dig} +short ${host} AAAA ${at} | ${grep} -E '^[0-9a-fA-F:]+$' >> "$TMPFILE6" || true'';
+    in
+    ''
+      echo "Resolving domains for ${name}..."
+
+      ${concatMapStringsSep "\n" (ip: ''echo "${ip}" >> "$TMPFILE"'') (nftStaticV4 interface)}
+      ${optionalString ipv6Enabled (
+        concatMapStringsSep "\n" (ip: ''echo "${ip}" >> "$TMPFILE6"'') (nftStaticV6 interface)
+      )}
+
+      ${concatMapStringsSep "\n" (domain: ''
+        echo "Resolving ${domain}..."
+        ${a domain}
+        ${aaaa domain}
+        for cname in $(${dig} +short ${domain} CNAME ${at} || true); do
+          ${a ''"$cname"''}
+          ${aaaa ''"$cname"''}
+        done
+      '') interface.domains}
+    '';
+
   mkResolveScript =
     name: interface:
     pkgs.writeShellScript "egress-resolve-${name}" ''
@@ -273,39 +303,7 @@ let
         ${ipset} create -exist "$IPSET6" hash:net family inet6 hashsize 1024 maxelem 65536
       ''}
 
-      echo "Resolving domains for ${name}..."
-
-      ${concatMapStringsSep "\n" (ip: ''
-        echo "${ip}" >> "$TMPFILE"
-      '') interface.allowedIPv4}
-
-      ${optionalString ipv6Enabled (
-        concatMapStringsSep "\n" (ip: ''
-          echo "${ip}" >> "$TMPFILE6"
-        '') interface.allowedIPv6
-      )}
-
-      ${concatMapStringsSep "\n" (ip: ''
-        if echo "${ip}" | ${grep} -qE ':'; then
-          ${optionalString ipv6Enabled ''echo "${ip}" >> "$TMPFILE6"''}
-        else
-          echo "${ip}" >> "$TMPFILE"
-        fi
-      '') interface.allowedIPs}
-
-      ${concatMapStringsSep "\n" (domain: ''
-        echo "Resolving ${domain}..."
-        ${dig} +short ${domain} A @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' >> "$TMPFILE" || true
-        ${optionalString ipv6Enabled ''
-          ${dig} +short ${domain} AAAA @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9a-fA-F:]+$' >> "$TMPFILE6" || true
-        ''}
-        for cname in $(${dig} +short ${domain} CNAME @${head interface.dnsServers} 2>/dev/null || true); do
-          ${dig} +short "$cname" A @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' >> "$TMPFILE" || true
-          ${optionalString ipv6Enabled ''
-            ${dig} +short "$cname" AAAA @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9a-fA-F:]+$' >> "$TMPFILE6" || true
-          ''}
-        done
-      '') interface.domains}
+      ${collectAddresses name interface}
 
       # Rebuild the allowlist in a temp set and atomically swap it in, so the
       # live FORWARD chain never matches a half-built set.
@@ -535,39 +533,7 @@ let
 
       ${nftEnsureSetsCommands name interface}
 
-      echo "Resolving domains for ${name}..."
-
-      ${concatMapStringsSep "\n" (ip: ''
-        echo "${ip}" >> "$TMPFILE"
-      '') interface.allowedIPv4}
-
-      ${optionalString ipv6Enabled (
-        concatMapStringsSep "\n" (ip: ''
-          echo "${ip}" >> "$TMPFILE6"
-        '') interface.allowedIPv6
-      )}
-
-      ${concatMapStringsSep "\n" (ip: ''
-        if echo "${ip}" | ${grep} -qE ':'; then
-          ${optionalString ipv6Enabled ''echo "${ip}" >> "$TMPFILE6"''}
-        else
-          echo "${ip}" >> "$TMPFILE"
-        fi
-      '') interface.allowedIPs}
-
-      ${concatMapStringsSep "\n" (domain: ''
-        echo "Resolving ${domain}..."
-        ${dig} +short ${domain} A @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' >> "$TMPFILE" || true
-        ${optionalString ipv6Enabled ''
-          ${dig} +short ${domain} AAAA @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9a-fA-F:]+$' >> "$TMPFILE6" || true
-        ''}
-        for cname in $(${dig} +short ${domain} CNAME @${head interface.dnsServers} 2>/dev/null || true); do
-          ${dig} +short "$cname" A @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' >> "$TMPFILE" || true
-          ${optionalString ipv6Enabled ''
-            ${dig} +short "$cname" AAAA @${head interface.dnsServers} 2>/dev/null | ${grep} -E '^[0-9a-fA-F:]+$' >> "$TMPFILE6" || true
-          ''}
-        done
-      '') interface.domains}
+      ${collectAddresses name interface}
 
       # Atomic rebuild: flush + repopulate in ONE nft -f transaction, so
       # the live FORWARD chain never matches a half-built set -- the same

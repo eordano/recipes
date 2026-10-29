@@ -2,7 +2,7 @@
 
 Carry a working local UI feature on top of a packaged web app -- replacing an
 upstream stub / "coming soon" placeholder component -- using a Nix
-`overrideAttrs` `postPatch`, **without forking upstream**.
+`overrideAttrs` `postPatch`, without forking upstream.
 
 The worked example targets [Headplane](https://github.com/tale/headplane)
 (a Headscale admin UI). Its ACL "preview" tab ships an upstream
@@ -15,7 +15,7 @@ already has in hand.
 You want a feature the upstream package doesn't provide yet (or renders as a
 stub), but you don't want to maintain a fork: forks drift, need rebasing on
 every release, and turn a one-line version bump into a merge chore. If the
-package builds **from source inside its derivation** (bundling happens after
+package builds from source inside its derivation (bundling happens after
 `postPatch`), you can graft the change in at package-build time and keep
 tracking upstream normally.
 
@@ -36,23 +36,23 @@ path, so it becomes a store input -- edit it and the package rebuilds.
 
 ## Traps / gotchas
 
-- **Use `--replace-fail`, not `--replace`.** If a future upstream release
+- Use `--replace-fail`, not `--replace`. If a future upstream release
   renames or removes the `<Construction />` placeholder, `--replace-fail` makes
-  the build *fail loudly* instead of silently shipping the untouched stub. This
+  the build fail loudly instead of silently shipping the untouched stub. This
   is the single most important line: it turns "my patch stopped working" from a
   runtime mystery into a build error. Re-verify the anchor string on every
   version bump.
-- **Append to `postPatch`, don't overwrite it.** `(old.postPatch or "") + ''...''`
+- Append to `postPatch`, don't overwrite it. `(old.postPatch or "") + ''...''`
   preserves any patching the upstream package already does.
-- **Append to `nativeBuildInputs` too.** The in-place edits need `gnused`; add
+- Append to `nativeBuildInputs` too. The in-place edits need `gnused`; add
   it defensively even if the builder already has it.
-- **The import must go before line 1's JSX.** `sed '1i'` inserts a new first
+- The import must go before line 1's JSX. `sed '1i'` inserts a new first
   line, keeping imports at the top of the module.
-- **Delete the placeholder prose, or it renders alongside your component.**
-  Replacing the stub *element* (step 3) does not remove the "coming soon"
-  paragraph next to it; the range delete (step 4) does. Keep the delete **last**
+- Delete the placeholder prose, or it renders alongside your component.
+  Replacing the stub element (step 3) does not remove the "coming soon"
+  paragraph next to it; the range delete (step 4) does. Keep the delete last
   so its anchor text isn't disturbed by an earlier edit.
-- **Only works for source-built packages.** If the package installs a
+- Only works for source-built packages. If the package installs a
   pre-bundled/minified artifact, there's no readable source to patch -- grafting
   must happen upstream of the bundler.
 

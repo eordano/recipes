@@ -423,13 +423,17 @@ in
 
             actionban = TIMEOUT=<bantime>; \
                        [ "$TIMEOUT" -gt 2147483 ] && TIMEOUT=2147483; \
-                       ${nftBin} add element inet fail2ban-ipset f2b-banned "{ <ip> timeout ''${TIMEOUT}s }" || \
-                       (echo "Failed to ban <ip> in nftables set f2b-banned" >&2; exit 1)
-            actionunban = ${nftBin} delete element inet fail2ban-ipset f2b-banned "{ <ip> }" || \
-                         (echo "Failed to unban <ip> from nftables set f2b-banned (may already be unbanned)" >&2)
+                       ${nftBin} add element inet fail2ban-ipset <banset> "{ <ip> timeout ''${TIMEOUT}s }" || \
+                       (echo "Failed to ban <ip> in nftables set <banset>" >&2; exit 1)
+            actionunban = ${nftBin} delete element inet fail2ban-ipset <banset> "{ <ip> }" || \
+                         (echo "Failed to unban <ip> from nftables set <banset> (may already be unbanned)" >&2)
 
             [Init]
             bantime = 345600
+            banset = f2b-banned
+
+            [Init?family=inet6]
+            banset = f2b-banned6
           ''
         else
           ''
@@ -444,13 +448,17 @@ in
 
             actionban = TIMEOUT=<bantime>; \
                        [ "$TIMEOUT" -gt 2147483 ] && TIMEOUT=2147483; \
-                       ${pkgs.ipset}/bin/ipset -exist add f2b-banned <ip> timeout $TIMEOUT || \
-                       (echo "Failed to ban <ip> in ipset f2b-banned" >&2; exit 1)
-            actionunban = ${pkgs.ipset}/bin/ipset -exist del f2b-banned <ip> || \
-                         (echo "Failed to unban <ip> from ipset f2b-banned (may already be unbanned)" >&2)
+                       ${pkgs.ipset}/bin/ipset -exist add <banset> <ip> timeout $TIMEOUT || \
+                       (echo "Failed to ban <ip> in ipset <banset>" >&2; exit 1)
+            actionunban = ${pkgs.ipset}/bin/ipset -exist del <banset> <ip> || \
+                         (echo "Failed to unban <ip> from ipset <banset> (may already be unbanned)" >&2)
 
             [Init]
             bantime = 345600
+            banset = f2b-banned
+
+            [Init?family=inet6]
+            banset = f2b-banned6
           '';
 
       "fail2ban/action.d/custom-ipset6.conf".text =

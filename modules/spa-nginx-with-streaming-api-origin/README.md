@@ -1,14 +1,14 @@
 # spa-nginx-with-streaming-api-origin
 
-A small NixOS module that co-hosts a Nix-built static single-page app **and** a
+A small NixOS module that co-hosts a Nix-built static single-page app and a
 same-origin streaming API -- Server-Sent Events, a websocket, a chunked
-long-poll -- behind **one** nginx vhost. Import it, point it at your built SPA
+long-poll -- behind one nginx vhost. Import it, point it at your built SPA
 directory and a set of API path prefixes, and it emits one
 `services.nginx.virtualHosts.<name>` that serves the assets, falls back to
 `index.html` for client-side routes, and reverse-proxies the API prefixes with
 buffering turned off so a stream arrives token by token.
 
-This is the **serving** half. The **build** half -- turning a pnpm/npm workspace
+This is the serving half. The build half -- turning a pnpm/npm workspace
 into the static `dist/` directory this module serves -- is
 [`packages/js-workspace-package`](../../packages/js-workspace-package/README.md).
 Reference it; this recipe does not repeat it.
@@ -26,16 +26,16 @@ one server.
 One origin means one nginx vhost doing two different jobs at once, and the two
 jobs fight:
 
-- The SPA half wants a catch-all: **any** path the server doesn't recognise as a
+- The SPA half wants a catch-all: any path the server doesn't recognise as a
   file should return `index.html`, because the path belongs to the client-side
   router, not to the filesystem. That is a greedy `/` location.
-- The API half wants specific path prefixes peeled off **before** that catch-all
+- The API half wants specific path prefixes peeled off before that catch-all
   ever sees them, and proxied to a backend -- proxied in a way that does not
   buffer, because the response is a stream that never "finishes" in the sense a
   buffering proxy waits for.
 
 Getting those two to share a server_name without stepping on each other is four
-traps deep, and every one of them fails *quietly*: the site loads, the happy
+traps deep, and every one of them fails quietly: the site loads, the happy
 path works, and the thing that's broken (a deep-link reload, a live event feed)
 is exactly the thing nobody clicks during setup.
 
@@ -85,30 +85,30 @@ emits this for you on the `/` location.
 ## Trap 2 -- the API locations are `^~`, and that prefix is load-bearing
 
 nginx does not evaluate locations top-to-bottom. Its order is: exact `=`, then
-`^~` prefixes (longest wins, and a match here **stops** the search), then
-**regex** locations in file order, then plain prefixes (longest wins) only if no
-regex matched. The trap: **a regex location beats a plain prefix.**
+`^~` prefixes (longest wins, and a match here stops the search), then
+regex locations in file order, then plain prefixes (longest wins) only if no
+regex matched. The trap: a regex location beats a plain prefix.
 
 The moment you add a regex location -- and static-asset caching is the most
 common reason to (`location ~* \.(js|css|png|woff2)$ { expires 1y; }`) -- a
-plain-prefix `/api/` would *lose* to it for any API path the regex happens to
+plain-prefix `/api/` would lose to it for any API path the regex happens to
 match. Marking the API prefixes `^~` puts them in the tier that wins over regex
 and short-circuits the search, so `/api/data.json` is proxied even in the
 presence of a `~ \.json$` rule. The module prefixes every `apiUpstreams` key
 with `^~` for this reason; the VM test injects a competing `~ \.json$` location
 and asserts the API still wins.
 
-(Note that `^~ /api/` beating the plain `/` SPA fallback is *not* the subtle
-part -- longest-prefix already does that. `^~` is about beating **regex**
+(Note that `^~ /api/` beating the plain `/` SPA fallback is not the subtle
+part -- longest-prefix already does that. `^~` is about beating regex
 locations, present or future.)
 
 ## Trap 3 -- streaming needs buffering off, and long timeouts
 
-By default nginx **buffers** a proxied response: it reads from the upstream into
+By default nginx buffers a proxied response: it reads from the upstream into
 memory/temp files and only then starts sending to the client. For a normal
 request that is a feature. For SSE or a chunked stream it is fatal -- the whole
 point is that events reach the browser as they happen, and a buffering proxy
-holds every event until the response *ends*, which for a live feed is "never".
+holds every event until the response ends, which for a live feed is "never".
 The visible symptom is a feed that shows nothing and then dumps everything at
 once when the connection finally closes: indistinguishable from a hang.
 
@@ -130,23 +130,23 @@ The timeout is `streamingTimeout` (default `1h`); raise it above the longest gap
 you expect between events. There is no "never time out" -- pick a generous
 bound. Websocket locations additionally get nginx's `proxyWebsockets` (the
 `Upgrade`/`Connection` header dance) when you set `websockets = true`; SSE does
-**not** need that, only the buffering-off block. The VM test proves the
+not need that, only the buffering-off block. The VM test proves the
 difference: the upstream flushes one event then holds the socket open, and a
 3-second bounded read returns that event -- which it could not if nginx were
 buffering.
 
 ## Trap 4 -- the SPA's bundler `base` must be absolute `/`
 
-This one lives in the **build** half but only bites because of the serving
+This one lives in the build half but only bites because of the serving
 half's fallback, so it belongs here. When Trap 1's fallback serves `index.html`
 for a deep route like `/rooms/42/live`, the browser resolves that document's
-asset URLs relative to the **page** URL. If the bundle was built with a relative
+asset URLs relative to the page URL. If the bundle was built with a relative
 base (`base: './'`), `index.html` contains `<script src="./assets/app-*.js">`,
 which the browser expands to `/rooms/42/assets/app-*.js` -- a path that does not
 exist -- and every chunk 404s. The app shell loads and then silently fails to
 boot, on deep routes only.
 
-Build with an **absolute** base (`base: '/'`) so the emitted URLs are
+Build with an absolute base (`base: '/'`) so the emitted URLs are
 `/assets/app-*.js`, which resolve correctly no matter how deep the route that
 served the shell was. See `example-vite/vite.config.ts` in this recipe for the
 Vite form, including the dev-only proxy that reproduces the same-origin shape
@@ -211,17 +211,17 @@ Per API upstream (`apiUpstreams.<prefix>.*`):
 
 ## Caveats
 
-- **This module owns the whole vhost's `locations`.** The API prefixes plus the
+- This module owns the whole vhost's `locations`. The API prefixes plus the
   `/` fallback are generated; add your own via `extraVirtualHostConfig.locations`
   (they merge). If you need a static-asset caching regex, remember Trap 2 is the
   reason your API prefixes are `^~`.
-- **`proxy_pass` here is bare** -- no upstream keepalive pool, no load balancing.
+- `proxy_pass` here is bare -- no upstream keepalive pool, no load balancing.
   For multiple backends behind one prefix, define an `upstream {}` block via
   `services.nginx.upstreams` and point `upstream` at it.
-- **The backend still has to cooperate.** nginx not buffering does not help if
+- The backend still has to cooperate. nginx not buffering does not help if
   your app framework buffers: SSE handlers must flush after each event, and some
   stacks buffer by default. Buffering-off is necessary, not sufficient.
-- **`streamingTimeout` is a real ceiling.** A connection idle longer than it is
+- `streamingTimeout` is a real ceiling. A connection idle longer than it is
   cut. For SSE that usually means the client reconnects (EventSource does so
   automatically); for a raw websocket, send application-level pings under the
   bound.

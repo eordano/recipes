@@ -134,6 +134,16 @@ in
           example = "nixpkgs=/nix/var/nix/profiles/per-user/root/channels/nixos";
           description = "Optional NIX_PATH override for the rebuild (null = inherit system default).";
         };
+        extraScopes = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [
+            "haskellPackages"
+            "rPackages"
+            "rocqPackages"
+            "texlive.pkgs"
+          ];
+          description = "Non-recursed package sets nix-index also indexes. Its built-in default still names coqPackages, which nixpkgs removed, and nix-env then fails the whole run.";
+        };
       };
     };
   };
@@ -156,7 +166,10 @@ in
       serviceConfig = {
         Type = "oneshot";
         User = hm.nixIndex.user;
-        ExecStart = "${pkgs.nix-index}/bin/nix-index";
+        ExecStart = lib.concatStringsSep " " (
+          [ "${pkgs.nix-index}/bin/nix-index" ]
+          ++ map (scope: "--extra-scopes ${lib.escapeShellArg scope}") hm.nixIndex.extraScopes
+        );
         Nice = 19;
         IOSchedulingClass = "idle";
       };
@@ -175,6 +188,12 @@ in
 
     home-manager = {
       backupFileExtension = ".bak";
+      # The suffix is fixed, so a second unmanaged copy of the same file (a
+      # `git config --global` turning ~/.config/git/config back into a plain
+      # file, a KCM rewriting mimeapps.list) collides with the first one's
+      # backup and aborts the whole activation on every later deploy. Keep the
+      # newest copy instead; the older .bak is a stale snapshot of the same file.
+      overwriteBackup = true;
       useGlobalPkgs = true;
       useUserPackages = true;
       inherit (hm) sharedModules;

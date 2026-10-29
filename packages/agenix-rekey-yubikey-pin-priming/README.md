@@ -1,29 +1,29 @@
 # Prime the YubiKey PIN Cache Before Running agenix-rekey
 
 Wrappers that let you drive [agenix-rekey](https://github.com/oddlama/agenix-rekey)
-with a **YubiKey master identity** (`age-plugin-yubikey`) without the decrypt
+with a YubiKey master identity (`age-plugin-yubikey`) without the decrypt
 step hanging forever.
 
 ## The problem
 
 agenix / agenix-rekey do their crypto as an internal `decrypt | encrypt`
 pipeline. When your master age identity lives on a YubiKey, `rage`/`age` has to
-ask the card for its PIV **PIN** before it can decrypt. But inside that pipeline
+ask the card for its PIV PIN before it can decrypt. But inside that pipeline
 there is no usable TTY, so instead of prompting you get:
 
 ```
 A PIN is required...
 ```
 
-...followed by a retry prompt that immediately hits EOF and **spins forever**.
+...followed by a retry prompt that immediately hits EOF and spins forever.
 `agenix rekey` and `agenix generate` never finish, and there is no obvious error
 to grep for.
 
 ## The insight
 
-`age-plugin-yubikey` **caches the PIN for the duration of a card session**. So
+`age-plugin-yubikey` caches the PIN for the duration of a card session. So
 the fix is not to make the pipeline interactive -- it's to satisfy the PIN prompt
-*once, up front*, in a real terminal, and let the cache carry it through the
+once, up front, in a real terminal, and let the cache carry it through the
 non-interactive pipeline that follows.
 
 Each wrapper runs a tiny priming preamble before handing off to agenix:
@@ -36,18 +36,18 @@ Each wrapper runs a tiny priming preamble before handing off to agenix:
 4. `exec` the real `agenix generate` / `agenix rekey -a`, which now decrypts
    straight from cache.
 
-A failed priming is a **warning, not a hard error**: the real command still
+A failed priming is a warning, not a hard error: the real command still
 runs and surfaces the true failure, rather than being masked by the wrapper.
 
 ## What you get
 
 Three CLIs from one `callPackage`:
 
-| command          | does                                                             |
-|------------------|-----------------------------------------------------------------|
+| command | does |
+|---|---|
 | `agenix-generate`| prime, then `agenix generate` (declarative generators)          |
 | `agenix-rekey`   | prime, then `agenix rekey -a` (fan out to per-host keys)         |
-| `agenix-encrypt` | encrypt an existing payload to the master pubkeys, no regen      |
+| `agenix-encrypt` | encrypt an existing payload to the master pubkeys, no regen |
 
 `agenix-encrypt` is the odd one out -- it does not run the agenix pipeline at
 all. It scrapes the `masterPubkeys = [ ... ]` list straight out of your
@@ -87,37 +87,37 @@ in
 
 ### Options
 
-| argument       | default                      | meaning                                                                 |
-|----------------|------------------------------|-------------------------------------------------------------------------|
-| `identityFile` | *required*                   | age identity used for the priming decrypt (relative to repo root)       |
+| argument | default | meaning |
+|---|---|---|
+| `identityFile` | required | age identity used for the priming decrypt (relative to repo root) |
 | `secretsDir`   | `"secrets"`                  | directory of flat `*.age` secrets                                       |
 | `rulesFile`    | `"${secretsDir}/rules.nix"`  | rules.nix carrying `masterPubkeys = [ ... ]` (used by `agenix-encrypt`)   |
-| `rulesHint`    | generic message              | printed when rules.nix is missing -- point it at your regen command      |
+| `rulesHint` | generic message | printed when rules.nix is missing -- point it at your regen command |
 
 Path resolution differs by wrapper. `agenix-encrypt` resolves the repo root from
 `$PRJ_ROOT`, falling back to `git rev-parse --show-toplevel`, and joins
 `rulesFile`/`secretsDir` onto it -- so it works from any subdirectory. The
 `agenix-generate`/`agenix-rekey` priming step, by contrast, uses `secretsDir` and
-`identityFile` **relative to the current working directory** (it just `find`s a
+`identityFile` relative to the current working directory (it just `find`s a
 canary and runs `rage -i <identityFile>`). Run those two from your repo root.
 (A failed prime is only a warning, so a wrong CWD degrades to "no priming"
 rather than a hard error.)
 
 ## Caveats
 
-- **Interactive tool.** These wrappers write into your working tree and need the
+- Interactive tool. These wrappers write into your working tree and need the
   YubiKey physically present. Run them by hand -- don't call them from CI or
-  unattended automation. (The TTY guard makes them safe to *invoke* there; they
+  unattended automation. (The TTY guard makes them safe to invoke there; they
   just won't prime, and the underlying command will fail loudly if it needs the
   card.)
-- **Flat `secrets/*.age` layout.** The canary probe and `agenix-encrypt`'s
+- Flat `secrets/*.age` layout. The canary probe and `agenix-encrypt`'s
   output path assume secrets live directly under `secretsDir`. Nested layouts
   need the paths adjusted.
-- **`agenix-encrypt` parses rules.nix textually.** It expects the conventional
+- `agenix-encrypt` parses rules.nix textually. It expects the conventional
   `masterPubkeys = [ "..." "..." ]` block that agenix-rekey rules generators emit,
   one quoted key per line. If your rules.nix formats that list differently,
   adjust the `sed` extraction.
-- **One canary is enough.** Any decryptable secret primes the session; the
+- One canary is enough. Any decryptable secret primes the session; the
   wrapper decrypts to `/dev/null` purely for the PIN-cache side effect.
 ## See also
 

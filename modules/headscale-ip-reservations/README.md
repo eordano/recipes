@@ -23,16 +23,16 @@ The check turns that silent drift into a failed systemd unit.
 
 Three distinct faults, reported separately because they mean different things:
 
-- **duplicates** -- two or more nodes claim one hostname. This is the
+- duplicates -- two or more nodes claim one hostname. This is the
   re-registration case: headscale keeps the old row and appends a suffix to
   the new node's `given_name` (`myhost` -> `myhost-1`), so the fleet now has
   two rows for one machine and only one of them is live.
-- **wrong_ip** -- the node exists but does not hold the address you reserved
+- wrong_ip -- the node exists but does not hold the address you reserved
   for it. Something else took the address, or this node was reassigned.
-- **missing** -- a host you reserved an address for is absent from headscale
+- missing -- a host you reserved an address for is absent from headscale
   entirely.
 
-Reconciliation is on the *reported hostname*, not on `given_name`, precisely
+Reconciliation is on the reported hostname, not on `given_name`, precisely
 because `given_name` is what headscale mangles when a name collides.
 
 Nodes you have not reserved an address for are ignored. Phones and tablets
@@ -51,7 +51,7 @@ modules.services.headscale-ip-reservations = {
 
 Point `reservations` at whatever already declares your addresses -- the same
 attrset your ACL policy or DNS records are generated from. The value of this
-check comes from it comparing headscale against your *single source of truth*;
+check comes from it comparing headscale against your single source of truth;
 maintaining a second hand-written list here would just create a third thing to
 drift.
 
@@ -70,18 +70,18 @@ registered at all times, because "missing" is otherwise indistinguishable from
 
 ## Traps
 
-**This is a detector, not a fix.** It tells you an address moved; it does not
+This is a detector, not a fix. It tells you an address moved; it does not
 move it back. Reassigning is a headscale-side operation and doing it
 automatically would be the wrong default -- the right response to a duplicate is
 usually to delete the stale row, and no check should delete node records on its
 own.
 
-**It needs to reach headscale's CLI.** The default resolves the binary from
+It needs to reach headscale's CLI. The default resolves the binary from
 `services.headscale` on the same host. If headscale runs in a container or on
 another machine, set `headscaleCommand` to something that reaches it; the unit
 runs as root and shells out, so a wrapper script is fine.
 
-**A node with no addresses at all is reported as `wrong_ip`, not `missing`.**
+A node with no addresses at all is reported as `wrong_ip`, not `missing`.
 It is registered, so it is present; it simply holds nothing matching the
 reservation. That is the honest classification, but it reads oddly the first
 time.

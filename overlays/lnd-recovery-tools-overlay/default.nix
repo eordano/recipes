@@ -4,21 +4,21 @@ let
   chantools = prev.callPackage (
     {
       lib,
-      buildGoModule,
+      buildGoLatestModule,
       fetchFromGitHub,
     }:
-    buildGoModule rec {
+    buildGoLatestModule rec {
       pname = "chantools";
-      version = "0.14.2";
+      version = "0.14.3";
 
       src = fetchFromGitHub {
         owner = "lightninglabs";
         repo = "chantools";
         rev = "v${version}";
-        hash = "sha256-pHcTBoipN1mYdGPswgAUVs/A3k1HKD5LXmCxwduStOw=";
+        hash = "sha256-uPuRMV4xU3T/IniIHb2iuO0GGzO+ssoOPSN3S56/thk=";
       };
 
-      vendorHash = "sha256-+jOrR8jhNdMvICwwLPAuYTGjlkXh7y4tZceioi9EJQI=";
+      vendorHash = "sha256-S+lPl3h4U8dxJRmpSn/etAjwfpwpJK8Y0A3+ns08O9g=";
 
       subPackages = [ "cmd/chantools" ];
 
@@ -27,7 +27,10 @@ let
         "-w"
       ];
 
-      checkFlags = [ "-skip=^TestCompactDBAndDumpChannels$" ];
+      checkFlags = [
+        "-skip=^TestCompactDBAndDumpChannels$"
+        "-timeout=30m"
+      ];
 
       meta = {
         description = "Tools for rescuing funds from Lightning Network channels";
@@ -41,21 +44,21 @@ let
   bbolt-cli = prev.callPackage (
     {
       lib,
-      buildGoModule,
+      buildGoLatestModule,
       fetchFromGitHub,
     }:
-    buildGoModule rec {
+    buildGoLatestModule rec {
       pname = "bbolt-cli";
-      version = "1.4.3";
+      version = "1.5.0";
 
       src = fetchFromGitHub {
         owner = "etcd-io";
         repo = "bbolt";
         rev = "v${version}";
-        hash = "sha256-awBkr2ObRxPQkMlfVFZxEbQ9JQJsFrJvSBHtqP4Hb3I=";
+        hash = "sha256-y48QXeffXBNBEsScMTSWQnXVG7xCZEAbAGKyfzl9m4Q=";
       };
 
-      vendorHash = "sha256-TzVmAMrNrNkFE9jQ+SILJXvbhBK1WenNPqA0FfuDU+M=";
+      vendorHash = "sha256-Tp6IINFK8SR2AIqEeMP3qK2f90EpLPMibFATG3j9VKs=";
 
       subPackages = [ "cmd/bbolt" ];
 

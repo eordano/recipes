@@ -2,10 +2,10 @@ _: prev:
 let
   inherit (prev) lib stdenv fetchurl;
 
-  version = "2.7.14";
+  version = "2.9.7";
 
   hashes = {
-    aarch64-apple-darwin = "sha256-rrWCX4O0qc1/k1WhxN3WZiBdrPdsy3uYwrEOBmvJ5Ls=";
+    aarch64-apple-darwin = "sha256-XNRtYmj2949diL3HFZ0gvUTNqkszA0dIOfh+xv564lw=";
     x86_64-apple-darwin = lib.fakeHash;
   };
 

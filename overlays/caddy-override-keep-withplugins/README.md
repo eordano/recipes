@@ -1,7 +1,7 @@
 # caddy-override-keep-withplugins
 
 Rebuild Caddy against a different Go toolchain (a newer/pinned release, a patched
-compiler, whatever) **without losing `caddy.withPlugins`**.
+compiler, whatever) without losing `caddy.withPlugins`.
 
 ## The problem
 
@@ -20,13 +20,13 @@ now fails with `attribute 'withPlugins' missing`.
 `withPlugins` is a helper nixpkgs attaches to Caddy via `passthru`, defined in
 `pkgs/by-name/ca/caddy/plugins.nix`. Two things break it:
 
-1. **`overrideAttrs` replaces `passthru`** instead of deep-merging, so if you
+1. `overrideAttrs` replaces `passthru` instead of deep-merging, so if you
    `overrideAttrs` the base package the plugin builder is gone.
-2. Even the original `withPlugins` closed over the **original** caddy and Go. If
+2. Even the original `withPlugins` closed over the original caddy and Go. If
    you preserved it verbatim, plugin builds would use the wrong toolchain -- not
    the one you just overrode to.
 
-So there's no way to "keep" the old `withPlugins`; you have to **re-create** it,
+So there's no way to "keep" the old `withPlugins`; you have to re-create it,
 bound to your overridden inputs.
 
 ## The fix
@@ -46,12 +46,12 @@ caddy = caddyBase.overrideAttrs (old: {
 
 Key points:
 
-- **`final.callPackage` + `caddy = final.caddy`** -- refer to the *final*
+- `final.callPackage` + `caddy = final.caddy` -- refer to the final
   (fully-overlaid) caddy so `withPlugins` builds the same package you're
   exporting, including later overlays.
-- **`${prev.path}/pkgs/by-name/...`** -- reuse upstream's plugins.nix from the
+- `${prev.path}/pkgs/by-name/...` -- reuse upstream's plugins.nix from the
   nixpkgs source tree (`prev.path`) rather than vendoring a copy that will rot.
-- **`(old.passthru or { }) // { ... }`** -- merge, don't clobber, so any other
+- `(old.passthru or { }) // { ... }` -- merge, don't clobber, so any other
   passthru attributes survive.
 
 ## Usage

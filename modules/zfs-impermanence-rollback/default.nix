@@ -280,76 +280,64 @@ in
   };
 
   config = mkIf (cfg.enable && enabled != { }) {
-    assertions = [
-      {
-        assertion = config.boot.initrd.systemd.enable;
+    assertions =
+      lib.mapAttrsToList (name: e: {
+        assertion = fsOf e != null;
         message = ''
-          zfsWipeOnBoot requires the systemd initrd
-          (`boot.initrd.systemd.enable = true`). Scripted stage 1 has no unit
-          ordering at all: `boot.initrd.postDeviceCommands` runs as an
-          unordered blob and is a removed option under systemd stage 1
-          (nixos/modules/system/boot/systemd/initrd.nix, the `obsoleteOpt`
-          list).
+          zfsWipeOnBoot.datasets.${name}.mountPoint is "${toString e.mountPoint}"
+          but there is no `fileSystems."${toString e.mountPoint}"`. Either declare
+          the filesystem or set mountPoint = null.
         '';
-      }
-    ]
-    ++ lib.mapAttrsToList (name: e: {
-      assertion = fsOf e != null;
-      message = ''
-        zfsWipeOnBoot.datasets.${name}.mountPoint is "${toString e.mountPoint}"
-        but there is no `fileSystems."${toString e.mountPoint}"`. Either declare
-        the filesystem or set mountPoint = null.
-      '';
-    }) mounted
-    ++ lib.mapAttrsToList (name: e: {
-      assertion = fsOf e == null || utils.fsNeededForBoot (fsOf e);
-      message = ''
-        zfsWipeOnBoot.datasets.${name} wipes ${e.dataset} mounted at
-        ${toString e.mountPoint}, but that filesystem is not neededForBoot.
-
-        Its `${initrdMountUnit e.mountPoint}` unit therefore does not exist in
-        the initrd, the mount happens in stage 2 instead, and the wipe is
-        unordered with respect to it. Set `neededForBoot = true` (or leave
-        zfsWipeOnBoot.enforceNeededForBoot at its default).
-      '';
-    }) mounted
-    ++ [
-      {
-        assertion = atRisk sshdHostKeyPaths == [ ];
+      }) mounted
+      ++ lib.mapAttrsToList (name: e: {
+        assertion = fsOf e == null || utils.fsNeededForBoot (fsOf e);
         message = ''
-          zfsWipeOnBoot would destroy this host's SSH host key on every boot:
-          ${lib.concatStringsSep ", " (map toString (atRisk sshdHostKeyPaths))}
+          zfsWipeOnBoot.datasets.${name} wipes ${e.dataset} mounted at
+          ${toString e.mountPoint}, but that filesystem is not neededForBoot.
 
-          services.openssh.hostKeys must live on a dataset that is NOT rolled
-          back, or every reboot regenerates the machine's identity. sshd still
-          starts, so nothing looks broken -- but every client that pinned the
-          old key refuses to connect, and you find out from the one machine you
-          can no longer reach.
+          Its `${initrdMountUnit e.mountPoint}` unit therefore does not exist in
+          the initrd, the mount happens in stage 2 instead, and the wipe is
+          unordered with respect to it. Set `neededForBoot = true` (or leave
+          zfsWipeOnBoot.enforceNeededForBoot at its default).
         '';
-      }
-      {
-        assertion = atRisk initrdHostKeyPaths == [ ];
+      }) mounted
+      ++ [
+        {
+          assertion = atRisk sshdHostKeyPaths == [ ];
+          message = ''
+            zfsWipeOnBoot would destroy this host's SSH host key on every boot:
+            ${lib.concatStringsSep ", " (map toString (atRisk sshdHostKeyPaths))}
+
+            services.openssh.hostKeys must live on a dataset that is NOT rolled
+            back, or every reboot regenerates the machine's identity. sshd still
+            starts, so nothing looks broken -- but every client that pinned the
+            old key refuses to connect, and you find out from the one machine you
+            can no longer reach.
+          '';
+        }
+        {
+          assertion = atRisk initrdHostKeyPaths == [ ];
+          message = ''
+            zfsWipeOnBoot would destroy the INITRD SSH host key:
+            ${lib.concatStringsSep ", " (map toString (atRisk initrdHostKeyPaths))}
+
+            boot.initrd.network.ssh.hostKeys is read from the live filesystem when
+            the initrd secrets are assembled, so a wiped path loses it. On a
+            remote-unlock host this is the worst version of the failure: the key
+            that changed is the one used by whoever has to log in to unlock the
+            disk, and there is no other way in.
+          '';
+        }
+      ]
+      ++ lib.mapAttrsToList (name: e: {
+        assertion = fsOf e == null || (fsOf e).fsType == "zfs";
         message = ''
-          zfsWipeOnBoot would destroy the INITRD SSH host key:
-          ${lib.concatStringsSep ", " (map toString (atRisk initrdHostKeyPaths))}
-
-          boot.initrd.network.ssh.hostKeys is read from the live filesystem when
-          the initrd secrets are assembled, so a wiped path loses it. On a
-          remote-unlock host this is the worst version of the failure: the key
-          that changed is the one used by whoever has to log in to unlock the
-          disk, and there is no other way in.
+          zfsWipeOnBoot.datasets.${name} wipes the ZFS dataset ${e.dataset}, but
+          fileSystems."${toString e.mountPoint}".fsType is
+          "${(fsOf e).fsType}". Rolling a dataset back underneath a mount of a
+          different filesystem does nothing useful.
         '';
-      }
-    ]
-    ++ lib.mapAttrsToList (name: e: {
-      assertion = fsOf e == null || (fsOf e).fsType == "zfs";
-      message = ''
-        zfsWipeOnBoot.datasets.${name} wipes the ZFS dataset ${e.dataset}, but
-        fileSystems."${toString e.mountPoint}".fsType is
-        "${(fsOf e).fsType}". Rolling a dataset back underneath a mount of a
-        different filesystem does nothing useful.
-      '';
-    }) mounted;
+      }) mounted;
 
     warnings = lib.filter (w: w != null) (
       lib.mapAttrsToList (

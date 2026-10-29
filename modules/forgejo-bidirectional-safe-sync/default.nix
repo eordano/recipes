@@ -51,7 +51,7 @@ in
     interpreter = lib.mkOption {
       type = lib.types.nullOr (lib.types.listOf lib.types.str);
       default = [
-        "${pkgs.nodejs}/bin/node"
+        "${pkgs.nodejs_26}/bin/node"
         "--experimental-strip-types"
       ];
       description = ''

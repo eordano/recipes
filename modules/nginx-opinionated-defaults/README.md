@@ -6,7 +6,7 @@ module in place -- import it and keep configuring `services.nginx` as usual.
 
 ## The problems it solves
 
-**The stock log format is blind to `Host`.** nginx's built-in `combined` log
+The stock log format is blind to `Host`. nginx's built-in `combined` log
 format does not record the request `Host` header. On a box serving one vhost
 that's fine; on a box serving many, every log line looks identical at the server
 level and you cannot tell which site a request hit. That breaks per-vhost
@@ -14,14 +14,14 @@ analytics (goaccess), per-vhost intrusion detection (fail2ban filters keyed on
 host), and plain `grep`. This module defines a `combined_with_host` format that
 appends `"$host"` and points `access_log` at it.
 
-**A note on why the TLS block is hand-rolled -- and the cost of that.** An
+A note on why the TLS block is hand-rolled -- and the cost of that. An
 earlier version of this recipe justified its own TLS block as a way to dodge
 OCSP stapling that upstream `recommendedTlsSettings` supposedly forced on. That
 premise was simply wrong: `ssl_stapling` appears nowhere in the nixpkgs nginx
 module, so there was never anything to dodge. Worse, upstream's block had since
 gained a post-quantum hybrid key-exchange group (`ssl_conf_command Groups
 "X25519MLKEM768:X25519:P-256:P-384";`) that the hand-rolled one lacked, leaving
-this recipe *weaker* than upstream on that axis. The block now carries the same
+this recipe weaker than upstream on that axis. The block now carries the same
 `Groups` directive, restoring parity.
 
 We still keep our own block (rather than flipping `recommendedTlsSettings` back
@@ -30,20 +30,20 @@ underneath us -- but the flip side is real: **whenever upstream's
 `recommendedTlsSettings` changes, re-diff it against
 `customRecommendedTlsSettings` here.** Parity is manual now.
 
-**Session/cipher tuning, kept as our own block.** This module supplies its own
+Session/cipher tuning, kept as our own block. This module supplies its own
 TLS session-cache/tickets/cipher-preference settings (`customRecommendedTlsSettings`)
 instead of upstream's `recommendedTlsSettings`, purely to keep them declared in
 one place we control rather than depending on upstream's block staying
 unchanged underneath us.
 
-**HSTS should be set once, everywhere.** Rather than repeat the header per
+HSTS should be set once, everywhere. Rather than repeat the header per
 vhost, the module defines a single `$scheme -> $hsts_header` map in the http
 block, so every https response carries HSTS.
 
-**Cloudflare hides the real client IP.** When traffic arrives through
+Cloudflare hides the real client IP. When traffic arrives through
 Cloudflare, `$remote_addr` is a Cloudflare edge IP. The real client IP is in the
 `CF-Connecting-IP` header, but nginx will only trust it from known-Cloudflare
-sources. This module reads Cloudflare's *officially published* IP-range list and
+sources. This module reads Cloudflare's officially published IP-range list and
 emits the `set_real_ip_from` directives for you -- so the trust list stays
 correct as Cloudflare's ranges change, instead of being hand-copied and going
 stale.
@@ -54,11 +54,11 @@ stale.
 `Cross-Origin-Embedder-Policy: require-corp`, is aggressive: it breaks any page
 that loads cross-origin subresources that don't send CORP/CORS headers. Real
 apps hit this -- Immich is a known example. So the security headers are opt-in
-**per vhost**, and you should only enable them for vhosts you know are
+per vhost, and you should only enable them for vhosts you know are
 self-contained.
 
 A second trap lives in those headers: they reference `$hsts_header`, which is an
-nginx *variable*. It must be defined in the http block or nginx refuses to
+nginx variable. It must be defined in the http block or nginx refuses to
 start. Keep `enableHSTSEverywhere = true` (the default) whenever any vhost uses
 `extraSecurity`.
 

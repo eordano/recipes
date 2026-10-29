@@ -12,7 +12,6 @@ let
         boot.loader.grub.enable = false;
         system.stateVersion = "25.05";
         networking.hostId = "00000000";
-        boot.initrd.systemd.enable = true;
         boot.supportedFilesystems = [ "zfs" ];
         fileSystems."/" = {
           device = "tank/root";
