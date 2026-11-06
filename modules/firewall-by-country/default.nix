@@ -222,30 +222,28 @@ let
     ${pkgs.ipset}/bin/ipset create -exist _probe hash:net family inet hashsize 64 maxelem 64
     ${pkgs.ipset}/bin/ipset destroy _probe
 
-    IPSET_RESTORE=$(mktemp)
-
+    {
     ${concatMapStrings (country: ''
-      echo "create -exist ${countryToIpset country} hash:net family inet hashsize 1024 maxelem 65536" >> $IPSET_RESTORE
-      echo "flush ${countryToIpset country}" >> $IPSET_RESTORE
+      echo "create -exist ${countryToIpset country} hash:net family inet hashsize 1024 maxelem 65536"
+      echo "flush ${countryToIpset country}"
       if [ -f "${geoipCountryLists}/share/geoip-country-lists/${toLower country}/ipv4-aggregated.txt" ]; then
         ${pkgs.gnugrep}/bin/grep -v "^#" "${geoipCountryLists}/share/geoip-country-lists/${toLower country}/ipv4-aggregated.txt" | \
-          ${pkgs.gawk}/bin/awk '{print "add -exist '${countryToIpset country}' " $1}' >> $IPSET_RESTORE
+          ${pkgs.gawk}/bin/awk '{print "add -exist '${countryToIpset country}' " $1}'
       fi
     '') countries}
 
     ${optionalString ipv6Enabled ''
       ${concatMapStrings (country: ''
-        echo "create -exist ${countryToIpset6 country} hash:net family inet6 hashsize 1024 maxelem 65536" >> $IPSET_RESTORE
-        echo "flush ${countryToIpset6 country}" >> $IPSET_RESTORE
+        echo "create -exist ${countryToIpset6 country} hash:net family inet6 hashsize 1024 maxelem 65536"
+        echo "flush ${countryToIpset6 country}"
         if [ -f "${geoipCountryLists}/share/geoip-country-lists/${toLower country}/ipv6-aggregated.txt" ]; then
           ${pkgs.gnugrep}/bin/grep -v "^#" "${geoipCountryLists}/share/geoip-country-lists/${toLower country}/ipv6-aggregated.txt" | \
-            ${pkgs.gawk}/bin/awk '{print "add -exist '${countryToIpset6 country}' " $1}' >> $IPSET_RESTORE
+            ${pkgs.gawk}/bin/awk '{print "add -exist '${countryToIpset6 country}' " $1}'
         fi
       '') countries}
     ''}
 
-    ${pkgs.ipset}/bin/ipset restore < $IPSET_RESTORE
-    rm -f $IPSET_RESTORE
+    } | ${pkgs.ipset}/bin/ipset restore
 
     ${concatMapStrings (country: ''
       ${pkgs.ipset}/bin/ipset list -n ${countryToIpset country} >/dev/null

@@ -165,3 +165,15 @@ per-country prefix lists derived fresh from `geoipPackage` every time. Prefix
 lists are still read from `geoipPackage` at runtime, not Nix eval time,
 exactly like the iptables path -- referencing them in the generated shell
 script never forces an import-from-derivation build during evaluation.
+
+## Why the ipset restore is piped, not written to /tmp
+
+`firewall.service` has `DefaultDependencies=no` and starts next to
+`systemd-tmpfiles-setup`. With `boot.tmp.cleanOnBoot` that unit runs `D! /tmp`
+while this module is still appending its `ipset restore` input to a `mktemp`
+file there: the file is unlinked mid-write, every later `>>` recreates it with
+only the remaining lines, `ipset restore` loads a partial set list, the
+existence check fails, and the host boots with `firewall.service` failed, which
+leaves INPUT on policy ACCEPT without the nixos-fw chain. Seen on vpnhead on
+2026-10-30, the first reboot after the module went fleet-wide. The generator
+now streams straight into `ipset restore`, so no file is involved.

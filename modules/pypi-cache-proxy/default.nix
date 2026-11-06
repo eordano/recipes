@@ -161,7 +161,7 @@ in
         PROXPI_CACHE_SIZE = toString cfg.proxpiCacheSize;
         PROXPI_INDEX_TTL = "1800";
         PROXPI_CONNECT_TIMEOUT = "5";
-        PROXPI_READ_TIMEOUT = "10";
+        PROXPI_READ_TIMEOUT = "30";
       };
 
       serviceConfig = {
@@ -219,6 +219,10 @@ in
       enable = lib.mkDefault true;
 
       appendHttpConfig = lib.mkAfter ''
+        map $http_accept $pypi_accept {
+          default "application/vnd.pypi.simple.v1+html, text/html;q=0.9";
+          "~application/vnd\.pypi\.simple\.v1\+json" "application/vnd.pypi.simple.v1+json";
+        }
         proxy_cache_path ${cfg.nginxCacheDir}
           levels=1:2
           keys_zone=pypicache:100m
@@ -237,7 +241,6 @@ in
             proxy_cache               pypicache;
             proxy_cache_valid         200 301 302 ${cfg.nginxCacheTime};
             proxy_cache_valid         404 1m;
-            proxy_cache_valid         any 10m;
 
             # Outage resilience: keep serving previously-seen packages when
             # proxpi and/or PyPI are unreachable or erroring.
@@ -252,7 +255,8 @@ in
             # proxy_cache_valid rules above govern freshness.
             proxy_ignore_headers      Cache-Control Expires Set-Cookie;
 
-            proxy_cache_key           $scheme$host$request_uri;
+            proxy_set_header          Accept $pypi_accept;
+            proxy_cache_key           $scheme$host$request_uri$pypi_accept;
 
             add_header                X-Cache-Status $upstream_cache_status always;
 

@@ -245,13 +245,14 @@ in
         mkdir -p ${cfg.dataDir} ${cfg.mariadbDataDir}
       '';
       postStart = ''
-        mysql="${
-          config.virtualisation.${cfg.backend}.package
-        }/bin/${cfg.backend} exec -i firefox-sync ${pkgs.mariadb}/bin/mysql -u root tokenserver"
-        ready() { $mysql -Ne 'SHOW TABLES' 2>/dev/null | grep -qx services; }
+        mysql() {
+          ${config.virtualisation.${cfg.backend}.package}/bin/${cfg.backend} exec -i firefox-sync \
+            sh -c 'exec /nix/store/*-mariadb-server-*/bin/mysql -u root tokenserver "$@"' sh "$@"
+        }
+        ready() { mysql -Ne 'SHOW TABLES' 2>/dev/null | grep -qx services; }
         until ready; do sleep 2; [ $SECONDS -gt 180 ] && break; done
         ready || { echo "firefox-sync: tokenserver tables never appeared, node not registered" >&2; exit 1; }
-        $mysql <<'SQL'
+        mysql <<'SQL'
         BEGIN;
         INSERT INTO services (service, pattern)
           SELECT 'sync-1.5', '{node}/1.5/{uid}'

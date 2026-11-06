@@ -76,6 +76,10 @@ let
     [security]
     INSTALL_LOCK = true
 
+    [service]
+    DISABLE_REGISTRATION = ${lib.boolToString (cfg.registration == "disabled")}
+    ALLOW_ONLY_EXTERNAL_REGISTRATION = ${lib.boolToString (cfg.registration == "external")}
+
     [server]
     # Forgejo 15.x hard-fails at startup if /data/.ssh/authorized_keys contains
     # any key not present in the DB (modules/ssh/init.go). If you have keys that
@@ -394,6 +398,20 @@ in
       description = "Whether to run Forgejo in a podman container or via native services.forgejo.";
     };
 
+    registration = mkOption {
+      type = types.enum [
+        "disabled"
+        "external"
+        "open"
+      ];
+      default = "disabled";
+      description = ''
+        Who may create an account: only an admin (disabled), anyone who signs in
+        through a configured OAuth2 source (external), or anyone with the
+        sign-up form (open, Forgejo's own default).
+      '';
+    };
+
     oidc = {
       enable = mkOption {
         type = types.bool;
@@ -601,6 +619,10 @@ in
         stateDir = cfg.dataDir;
         lfs.enable = true;
         settings = {
+          service = {
+            DISABLE_REGISTRATION = cfg.registration == "disabled";
+            ALLOW_ONLY_EXTERNAL_REGISTRATION = cfg.registration == "external";
+          };
           server =
             if cfg.useUnixSocket then
               {

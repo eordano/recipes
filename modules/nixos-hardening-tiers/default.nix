@@ -141,7 +141,8 @@ in
           "kernel.unprivileged_bpf_disabled" = lib.mkOverride 500 1;
           "net.core.bpf_jit_harden" = lib.mkForce 2;
           "kernel.yama.ptrace_scope" = lib.mkForce 2;
-          "kernel.ftrace_enabled" = lib.mkDefault false;
+          "kernel.ftrace_enabled" =
+            lib.mkIf (lib.versionOlder config.boot.kernelPackages.kernel.version "7.3") (lib.mkDefault false);
 
           "kernel.randomize_va_space" = lib.mkForce 2;
           "fs.suid_dumpable" = lib.mkOverride 500 0;

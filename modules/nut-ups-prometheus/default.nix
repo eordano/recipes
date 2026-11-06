@@ -140,6 +140,37 @@ in
 
     systemd.services.upsdrv.environment.NUT_QUIET_INIT_NDE_WARNING = "true";
 
+    systemd.services.nut-ups-watchdog = {
+      description = "Restart the NUT driver and upsd when the UPS stops answering";
+      path = [
+        pkgs.nut
+        pkgs.coreutils
+      ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        state=/run/nut-ups-watchdog
+        if timeout 10 upsc ${cfg.upsName}@localhost ups.status >/dev/null 2>&1; then
+          rm -f "$state"
+          exit 0
+        fi
+        n=$(( $(cat "$state" 2>/dev/null || echo 0) + 1 ))
+        echo "$n" > "$state"
+        if [ "$n" -ge 2 ]; then
+          echo "upsc ${cfg.upsName}@localhost failed $n times in a row; restarting upsdrv and upsd"
+          systemctl restart upsdrv.service upsd.service
+          rm -f "$state"
+        fi
+      '';
+    };
+
+    systemd.timers.nut-ups-watchdog = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "5min";
+        OnUnitActiveSec = "5min";
+      };
+    };
+
     services.prometheus.exporters.nut = {
       enable = true;
       listenAddress = "127.0.0.1";

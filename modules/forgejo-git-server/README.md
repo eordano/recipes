@@ -173,6 +173,7 @@ with `hidepid=2`.
 | `domain` | -- (required) | Public domain; drives `ROOT_URL` and the nginx vhost. |
 | `acmeHost` | `null` | ACME cert name for TLS; `null` leaves TLS unconfigured. |
 | `asContainer` | `true` | Podman-container shape vs. native `services.forgejo`. |
+| `registration` | `disabled` | Account creation: `disabled` (admin only), `external` (OAuth2 sign-in only), `open` (public form, Forgejo's default). |
 | `httpPort` | `3000` | Internal HTTP port behind nginx. |
 | `dataDir` | `/var/lib/forgejo` | State directory (`/data` inside the container). |
 | `uid` / `gid` | `null` | Pin service uid/gid for stable on-disk ownership. |
